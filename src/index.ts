@@ -8,6 +8,7 @@ import { Orchestrator } from "./runtime/orchestrator";
 import { createDirectorBot } from "./discord/director-bot";
 import { createWorkerBot } from "./discord/worker-bot";
 import { DiscordNotifier } from "./discord/notifier";
+import { registerSlashCommands } from "./discord/slash-commands";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -18,6 +19,8 @@ async function main(): Promise<void> {
   orchestrator.registerAgent(new DirectorAgent(config));
   orchestrator.registerAgent(new BuilderAgent(config));
   orchestrator.registerAgent(new FactoryAgent(config));
+
+  await registerSlashCommands(config);
 
   const loginPromises: Promise<string>[] = [];
 
