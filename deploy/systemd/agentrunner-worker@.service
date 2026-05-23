@@ -1,0 +1,25 @@
+[Unit]
+Description=AgentRunner isolated %i worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/agentrunner
+EnvironmentFile=/opt/agentrunner/.env
+Environment=AGENTRUNNER_WORKER_ROLE=%i
+ExecStart=/usr/local/bin/bun run worker
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=30
+User=agentrunner
+Group=agentrunner
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/opt/agentrunner /opt/game-projects /opt/obsidian-vaults
+
+[Install]
+WantedBy=multi-user.target
