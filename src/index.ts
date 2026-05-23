@@ -12,11 +12,11 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const store = await RuntimeStore.open(config.DATABASE_PATH);
   const vault = new VaultManager(config.OBSIDIAN_VAULT_PATH);
-  const orchestrator = new Orchestrator(store, vault);
+  const orchestrator = new Orchestrator(store, vault, config);
 
-  orchestrator.registerAgent(new DirectorAgent());
-  orchestrator.registerAgent(new BuilderAgent());
-  orchestrator.registerAgent(new FactoryAgent());
+  orchestrator.registerAgent(new DirectorAgent(config));
+  orchestrator.registerAgent(new BuilderAgent(config));
+  orchestrator.registerAgent(new FactoryAgent(config));
   await orchestrator.initialize();
 
   const loginPromises: Promise<string>[] = [];
