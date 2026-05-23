@@ -1,4 +1,5 @@
 import type { RuntimeConfig } from "../config";
+import { appendBrowserContext } from "../browser/adapter";
 import { RuntimeStore } from "../db/runtime-store";
 import type { RuntimeNotifier } from "../discord/notifier";
 import { NullNotifier } from "../discord/notifier";
@@ -87,8 +88,12 @@ export class Orchestrator {
     const baseEffectiveContent = skillContext
       ? [skillContext, "", "# User Request", "", input.content].join("\n")
       : input.content;
-    const effectiveContent = await appendVisionAnalysis({
+    const browserContent = await appendBrowserContext({
       content: baseEffectiveContent,
+      config: this.config,
+    });
+    const effectiveContent = await appendVisionAnalysis({
+      content: browserContent,
       config: this.config,
     });
 
