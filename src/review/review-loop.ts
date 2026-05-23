@@ -15,7 +15,9 @@ export async function runDirectorReview(input: {
   store: RuntimeStore;
   vault: VaultManager;
   config: RuntimeConfig;
+  round?: number;
 }): Promise<{ verdict: ReviewVerdict; path: string; output: string }> {
+  const round = input.round ?? 1;
   const prompt = buildDirectorReviewPrompt({
     taskId: input.taskId,
     originalPrompt: input.originalPrompt,
@@ -33,10 +35,10 @@ export async function runDirectorReview(input: {
 
   const output = result.output || result.error || "Director review returned no output.";
   const verdict = result.ok ? parseReviewVerdict(output) : "BLOCKED";
-  const path = `04_Reviews/${input.taskId}-review-round-1.md`;
+  const path = `04_Reviews/${input.taskId}-review-round-${round}.md`;
 
   input.store.recordTaskRun({
-    id: `RUN-${input.taskId}-director-${Date.now()}`,
+    id: `RUN-${input.taskId}-director-r${round}-${Date.now()}`,
     taskId: input.taskId,
     role: "director",
     model: input.config.CLAUDE_CODE_COMMAND,
@@ -49,10 +51,10 @@ export async function runDirectorReview(input: {
   });
 
   input.store.recordReview({
-    id: `REV-${input.taskId}-1-${Date.now()}`,
+    id: `REV-${input.taskId}-${round}-${Date.now()}`,
     taskId: input.taskId,
     verdict,
-    round: 1,
+    round,
     feedback: output,
   });
 
@@ -61,7 +63,7 @@ export async function runDirectorReview(input: {
     reviewNote({
       taskId: input.taskId,
       verdict,
-      round: 1,
+      round,
       body: output,
     }),
   );
