@@ -2,6 +2,7 @@ import type { RuntimeConfig } from "../config";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
 import { buildCliPrompt } from "../utils/prompt";
 import { runShellCommand } from "../utils/command";
+import { formatFailoverHeader, parseCommandCandidates, runCommandWithFailover } from "./failover";
 
 export class BuilderAgent implements AgentAdapter {
   readonly role = "builder" as const;
@@ -17,27 +18,29 @@ export class BuilderAgent implements AgentAdapter {
       workspacePath,
     });
 
-    const codexResult = await runShellCommand({
-      command: this.config.CODEX_COMMAND,
+    const codexResult = await runCommandWithFailover({
+      commands: parseCommandCandidates(this.config.CODEX_COMMAND, this.config.CODEX_COMMANDS),
       cwd: workspacePath,
-      input: prompt,
+      prompt,
       timeoutMs: this.config.AI_COMMAND_TIMEOUT_MS,
+      enabled: this.config.ENABLE_AGENT_FAILOVER,
     });
 
     const validation = await this.runValidation(workspacePath);
     const output = [
       "# Builder Result",
       "",
+      formatFailoverHeader(codexResult),
       "## Codex Output",
-      codexResult.stdout || codexResult.stderr || "No Codex output.",
+      codexResult.result.stdout || codexResult.result.stderr || "No Codex output.",
       "",
       validation,
     ].join("\n");
 
     return {
-      ok: codexResult.ok && !validation.includes("VALIDATION_FAILED"),
+      ok: codexResult.result.ok && !validation.includes("VALIDATION_FAILED"),
       output,
-      error: codexResult.ok ? extractValidationError(validation) : formatCliError(codexResult),
+      error: codexResult.result.ok ? extractValidationError(validation) : formatCliError(codexResult.result),
     };
   }
 
