@@ -24,10 +24,18 @@ const ConfigSchema = z.object({
   DASHBOARD_PORT: z.coerce.number().int().positive().default(8787),
   VISION_COMMAND: z.string().optional().default(""),
   VISION_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(300000),
-  OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434/v1"),
-  OLLAMA_MODEL: z.string().default("gemma"),
+  BROWSER_COMMAND: z.string().optional().default(""),
+  BROWSER_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(300000),
+  ENABLE_AGENT_FAILOVER: z.coerce.boolean().default(true),
   CLAUDE_CODE_COMMAND: z.string().default("claude"),
+  CLAUDE_CODE_COMMANDS: z.string().optional().default(""),
   CODEX_COMMAND: z.string().default("codex"),
+  CODEX_COMMANDS: z.string().optional().default(""),
+  FACTORY_COMMANDS: z.string().optional().default(""),
+  OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434/v1"),
+  OLLAMA_BASE_URLS: z.string().optional().default(""),
+  OLLAMA_MODEL: z.string().default("gemma"),
+  OLLAMA_MODELS: z.string().optional().default(""),
   AI_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
   MAX_REVIEW_ROUNDS: z.coerce.number().int().positive().default(3),
   TASK_LEASE_MINUTES: z.coerce.number().int().positive().default(30),
@@ -39,6 +47,7 @@ const ConfigSchema = z.object({
   APPROVED_TASK_COMMAND: z.string().optional().default(""),
   APPROVED_TASK_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
   REQUIRE_USER_APPROVAL_BEFORE_COMMIT: z.coerce.boolean().default(true),
+  AGENTRUNNER_WORKER_ROLE: z.enum(["director", "builder", "factory"]).optional(),
 });
 
 export type RuntimeConfig = z.infer<typeof ConfigSchema>;
