@@ -46,6 +46,7 @@ User Report
 - Discord `!tasks`, `!task`, `!retry`, `!help` 상태 명령어
 - Discord slash command: `/run`, `/tasks`, `/task`, `/retry`, `/help`
 - Discord 첨부파일 context 주입
+- Discord 첨부파일 로컬 저장
 - 작업 분류 라우터
 - SQLite WAL 런타임 스키마
 - task_runs / messages / reviews / artifacts 기록
@@ -88,6 +89,8 @@ GAME_DIRECTOR_CHANNEL_ID=
 OBSIDIAN_VAULT_PATH=./vault/AgentRunnerVault
 DATABASE_PATH=./data/agentrunner.sqlite
 PROJECT_ROOT=./game-project
+ATTACHMENTS_DIR=./data/attachments
+MAX_ATTACHMENT_BYTES=10000000
 GROUPS_CONFIG_PATH=./configs/groups.yaml
 SKILLS_DIR=./skills
 ```
@@ -188,10 +191,14 @@ filename
 url
 content_type
 size_bytes
-kind: image
+kind
+local_path
+skipped_reason
 ```
 
-현재 단계는 첨부 URL context 주입입니다. 실제 vision 모델로 이미지 자체를 분석하는 adapter 확장은 다음 단계입니다.
+첨부파일은 `ATTACHMENTS_DIR/<discord-message-id>/` 아래에 저장됩니다. `MAX_ATTACHMENT_BYTES`보다 큰 파일은 다운로드하지 않고 `skipped_reason`만 기록합니다.
+
+현재 단계는 이미지와 파일을 로컬 경로로 저장하고 프롬프트에 `local_path`를 주입하는 구조입니다. 실제 vision 모델로 이미지 자체를 분석하는 adapter 확장은 다음 단계입니다.
 
 ## 품질 게이트
 
