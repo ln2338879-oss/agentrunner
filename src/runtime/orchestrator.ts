@@ -1,5 +1,7 @@
 import type { RuntimeConfig } from "../config";
 import { RuntimeStore } from "../db/runtime-store";
+import type { RuntimeNotifier } from "../discord/notifier";
+import { NullNotifier } from "../discord/notifier";
 import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
 import { runDirectorReview, statusFromVerdict } from "../review/review-loop";
@@ -9,6 +11,7 @@ import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./t
 
 export class Orchestrator {
   private readonly agents = new Map<AgentRole, AgentAdapter>();
+  private notifier: RuntimeNotifier = new NullNotifier();
 
   constructor(
     private readonly store: RuntimeStore,
@@ -20,14 +23,19 @@ export class Orchestrator {
     this.agents.set(agent.role, agent);
   }
 
+  setNotifier(notifier: RuntimeNotifier): void {
+    this.notifier = notifier;
+  }
+
   async initialize(): Promise<void> {
     await this.vault.ensureDefaultFolders();
 
     if (this.config.RECOVER_STALE_TASKS_ON_START) {
       const recovered = this.store.recoverStaleTasks({ staleMinutes: this.config.STALE_TASK_MINUTES });
       if (recovered.length > 0) {
+        const recoveryPath = `08_Recovery/recovery-${Date.now()}.md`;
         await this.vault.writeNote(
-          `08_Recovery/recovery-${Date.now()}.md`,
+          recoveryPath,
           [
             "---",
             `created_at: ${new Date().toISOString()}`,
@@ -44,6 +52,7 @@ export class Orchestrator {
             "",
           ].join("\n"),
         );
+        await this.notifier.recovery({ count: recovered.length, path: recoveryPath });
       }
     }
   }
@@ -83,6 +92,7 @@ export class Orchestrator {
 
     if (!leaseAcquired) {
       this.store.updateTaskStatus(taskId, "blocked");
+      await this.notifier.blocked({ taskId, reason: "Task is already locked by another worker." });
       throw new Error(`Task ${taskId} is already locked by another worker.`);
     }
 
@@ -108,6 +118,13 @@ export class Orchestrator {
           discordChannelId: input.discordChannelId,
         }),
       );
+
+      await this.notifier.taskCreated({
+        taskId,
+        role: classified.assignedTo,
+        obsidianPath,
+        content: input.content,
+      });
 
       const agent = this.requireAgent(classified.assignedTo);
       let prompt = input.content;
@@ -136,6 +153,7 @@ export class Orchestrator {
 
         if (!result.result.ok) {
           this.store.updateTaskStatus(taskId, "failed");
+          await this.notifier.failed({ taskId, reportPath: latestReportPath, reason: result.result.error });
           return {
             taskId,
             assignedTo: classified.assignedTo,
@@ -166,6 +184,7 @@ export class Orchestrator {
           path: review.path,
           createdBy: "director",
         });
+        await this.notifier.reviewResult({ taskId, verdict: review.verdict, reviewPath: review.path, round });
 
         if (review.verdict === "APPROVED") {
           this.store.updateTaskStatus(taskId, "approved");
@@ -177,6 +196,12 @@ export class Orchestrator {
             output: result.result.output,
           });
           await this.runApprovedTaskCommand({ taskId, reportPath: latestReportPath, reviewPath: latestReviewPath });
+          await this.notifier.approved({
+            taskId,
+            approvedPath,
+            reportPath: latestReportPath,
+            reviewPath: latestReviewPath,
+          });
           return {
             taskId,
             assignedTo: classified.assignedTo,
@@ -190,6 +215,7 @@ export class Orchestrator {
 
         if (review.verdict === "BLOCKED") {
           this.store.updateTaskStatus(taskId, "blocked");
+          await this.notifier.blocked({ taskId, reviewPath: latestReviewPath, reason: review.output });
           return {
             taskId,
             assignedTo: classified.assignedTo,
@@ -210,6 +236,11 @@ export class Orchestrator {
       }
 
       this.store.updateTaskStatus(taskId, "failed");
+      await this.notifier.failed({
+        taskId,
+        reportPath: latestReportPath,
+        reason: `Exceeded MAX_REVIEW_ROUNDS=${this.config.MAX_REVIEW_ROUNDS}`,
+      });
       return {
         taskId,
         assignedTo: classified.assignedTo,
@@ -270,6 +301,12 @@ export class Orchestrator {
       type: "agent_report",
       path: reportPath,
       createdBy: input.role,
+    });
+    await this.notifier.workerReport({
+      taskId: input.taskId,
+      role: input.role,
+      reportPath,
+      round: input.round,
     });
 
     return { result, reportPath };
