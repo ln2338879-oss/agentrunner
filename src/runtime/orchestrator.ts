@@ -4,6 +4,7 @@ import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
 import { runDirectorReview, statusFromVerdict } from "../review/review-loop";
 import { classifyTask } from "../router/classify";
+import { runShellCommand } from "../utils/command";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./types";
 
 export class Orchestrator {
@@ -21,6 +22,30 @@ export class Orchestrator {
 
   async initialize(): Promise<void> {
     await this.vault.ensureDefaultFolders();
+
+    if (this.config.RECOVER_STALE_TASKS_ON_START) {
+      const recovered = this.store.recoverStaleTasks({ staleMinutes: this.config.STALE_TASK_MINUTES });
+      if (recovered.length > 0) {
+        await this.vault.writeNote(
+          `08_Recovery/recovery-${Date.now()}.md`,
+          [
+            "---",
+            `created_at: ${new Date().toISOString()}`,
+            `stale_task_minutes: ${this.config.STALE_TASK_MINUTES}`,
+            "---",
+            "",
+            "# Startup Recovery Report",
+            "",
+            "The following stale running or revision tasks were marked as BLOCKED during startup recovery.",
+            "",
+            "| Task | Previous Status | Locked By |",
+            "|---|---|---|",
+            ...recovered.map((task) => `| ${task.id} | ${task.status} | ${task.lockedBy ?? ""} |`),
+            "",
+          ].join("\n"),
+        );
+      }
+    }
   }
 
   async handleUserRequest(input: {
@@ -33,6 +58,7 @@ export class Orchestrator {
     obsidianPath: string;
     reportPath: string;
     reviewPath?: string;
+    approvedPath?: string;
     verdict?: ReviewVerdict;
   }> {
     const classified = classifyTask(input.content);
@@ -143,12 +169,21 @@ export class Orchestrator {
 
         if (review.verdict === "APPROVED") {
           this.store.updateTaskStatus(taskId, "approved");
+          const approvedPath = await this.writeApprovedSummary({
+            taskId,
+            role: classified.assignedTo,
+            reportPath: latestReportPath,
+            reviewPath: latestReviewPath,
+            output: result.result.output,
+          });
+          await this.runApprovedTaskCommand({ taskId, reportPath: latestReportPath, reviewPath: latestReviewPath });
           return {
             taskId,
             assignedTo: classified.assignedTo,
             obsidianPath,
             reportPath: latestReportPath,
             reviewPath: latestReviewPath,
+            approvedPath,
             verdict: latestVerdict,
           };
         }
@@ -238,6 +273,93 @@ export class Orchestrator {
     });
 
     return { result, reportPath };
+  }
+
+  private async writeApprovedSummary(input: {
+    taskId: string;
+    role: AgentRole;
+    reportPath: string;
+    reviewPath: string;
+    output: string;
+  }): Promise<string> {
+    const approvedPath = `07_Approved/${input.taskId}-approved.md`;
+    await this.vault.writeNote(
+      approvedPath,
+      [
+        "---",
+        `task_id: ${input.taskId}`,
+        `role: ${input.role}`,
+        "status: approved",
+        `report: ${input.reportPath}`,
+        `review: ${input.reviewPath}`,
+        `approved_at: ${new Date().toISOString()}`,
+        "---",
+        "",
+        "# Approved Task",
+        "",
+        `Report: ${input.reportPath}`,
+        "",
+        `Review: ${input.reviewPath}`,
+        "",
+        "## Final Output",
+        "",
+        input.output,
+      ].join("\n"),
+    );
+    this.store.recordArtifact({
+      id: `ART-${input.taskId}-approved-${Date.now()}`,
+      taskId: input.taskId,
+      type: "approved_summary",
+      path: approvedPath,
+      createdBy: "director",
+    });
+    return approvedPath;
+  }
+
+  private async runApprovedTaskCommand(input: { taskId: string; reportPath: string; reviewPath: string }): Promise<void> {
+    if (!this.config.APPROVED_TASK_COMMAND) return;
+    const commandInput = [
+      `TASK_ID=${input.taskId}`,
+      `REPORT_PATH=${input.reportPath}`,
+      `REVIEW_PATH=${input.reviewPath}`,
+    ].join("\n");
+    const result = await runShellCommand({
+      command: this.config.APPROVED_TASK_COMMAND,
+      cwd: this.config.PROJECT_ROOT,
+      input: commandInput,
+      timeoutMs: this.config.APPROVED_TASK_COMMAND_TIMEOUT_MS,
+    });
+    const path = `07_Approved/${input.taskId}-approved-command.md`;
+    await this.vault.writeNote(
+      path,
+      [
+        "---",
+        `task_id: ${input.taskId}`,
+        `ok: ${result.ok}`,
+        `exit_code: ${result.exitCode ?? "null"}`,
+        `created_at: ${new Date().toISOString()}`,
+        "---",
+        "",
+        "# Approved Task Command Result",
+        "",
+        "## Stdout",
+        "```text",
+        result.stdout || "",
+        "```",
+        "",
+        "## Stderr",
+        "```text",
+        result.stderr || "",
+        "```",
+      ].join("\n"),
+    );
+    this.store.recordArtifact({
+      id: `ART-${input.taskId}-approved-command-${Date.now()}`,
+      taskId: input.taskId,
+      type: "approved_command",
+      path,
+      createdBy: "director",
+    });
   }
 
   private requireAgent(role: AgentRole): AgentAdapter {
