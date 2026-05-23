@@ -1,0 +1,89 @@
+name: Approved Task Pull Request
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: AgentRunner task id, for example TASK-123
+        required: true
+        type: string
+      branch_name:
+        description: Branch to create or update
+        required: false
+        default: ""
+        type: string
+      report_path:
+        description: Obsidian report path
+        required: false
+        default: ""
+        type: string
+      review_path:
+        description: Obsidian review path
+        required: false
+        default: ""
+        type: string
+      base_branch:
+        description: Pull request base branch
+        required: false
+        default: main
+        type: string
+      draft:
+        description: Create as draft PR
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch }}
+
+      - name: Resolve branch name
+        id: vars
+        run: |
+          TASK_ID="${{ inputs.task_id }}"
+          BRANCH_NAME="${{ inputs.branch_name }}"
+          if [ -z "$BRANCH_NAME" ]; then
+            BRANCH_NAME="agent/${TASK_ID}"
+          fi
+          echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Create approved task marker
+        run: |
+          mkdir -p .agentrunner/approved
+          cat > ".agentrunner/approved/${{ inputs.task_id }}.md" <<'EOF'
+          # AgentRunner Approved Task
+
+          - Task: ${{ inputs.task_id }}
+          - Report: ${{ inputs.report_path }}
+          - Review: ${{ inputs.review_path }}
+          - Created by: GitHub Actions
+          EOF
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "feat(agent): apply ${{ inputs.task_id }}"
+          branch: ${{ steps.vars.outputs.branch_name }}
+          base: ${{ inputs.base_branch }}
+          title: "feat(agent): apply ${{ inputs.task_id }}"
+          body: |
+            AgentRunner approved task: `${{ inputs.task_id }}`
+
+            - Report: `${{ inputs.report_path }}`
+            - Review: `${{ inputs.review_path }}`
+
+            This PR was created by the Approved Task Pull Request workflow.
+          draft: ${{ inputs.draft }}
+          labels: |
+            agentrunner
+            ai-generated
