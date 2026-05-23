@@ -31,13 +31,13 @@ OLLAMA_MODELS=llama3.1||mistral
 AgentRunner can enrich URL-heavy tasks before they are routed to agents.
 
 ```env
-BROWSER_COMMAND=
+BROWSER_COMMAND=bun scripts/browser-fetch.ts
 BROWSER_COMMAND_TIMEOUT_MS=300000
 ```
 
 When a prompt includes URLs and `BROWSER_COMMAND` is set, AgentRunner sends the URLs to the command through stdin and appends stdout as `# Browser Context`.
 
-The command can be a Playwright script, a custom fetcher, or any local CLI that reads stdin and writes source-aware notes to stdout.
+`scripts/browser-fetch.ts` is a lightweight default command. It fetches URLs, strips basic HTML, and returns concise page text. Replace it with a Playwright script if you need Chromium screenshots, login flows, or dynamic pages.
 
 ## Worker Process Isolation
 
