@@ -1,8 +1,10 @@
 import { Client, GatewayIntentBits } from "discord.js";
 import { RuntimeConfig } from "../config";
+import type { RuntimeStore } from "../db/runtime-store";
+import { handleDirectorCommand, isCommand } from "./commands";
 import { Orchestrator } from "../runtime/orchestrator";
 
-export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestrator): Client {
+export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestrator, store: RuntimeStore): Client {
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -20,6 +22,14 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
     if (config.GAME_DIRECTOR_CHANNEL_ID && message.channelId !== config.GAME_DIRECTOR_CHANNEL_ID) return;
 
     try {
+      if (isCommand(message.content)) {
+        const commandResult = await handleDirectorCommand({ content: message.content, store });
+        if (commandResult) {
+          await message.reply(commandResult);
+          return;
+        }
+      }
+
       const result = await orchestrator.handleUserRequest({
         content: message.content,
         discordMessageId: message.id,
@@ -33,6 +43,7 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
         `Obsidian Task: ${result.obsidianPath}`,
         `Report: ${result.reportPath}`,
         result.reviewPath ? `Review: ${result.reviewPath}` : undefined,
+        result.approvedPath ? `Approved: ${result.approvedPath}` : undefined,
       ].filter(Boolean).join("\n"));
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
