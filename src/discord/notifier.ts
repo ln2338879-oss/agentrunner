@@ -1,4 +1,4 @@
-import type { Client, TextBasedChannel } from "discord.js";
+import type { Client } from "discord.js";
 import type { RuntimeConfig } from "../config";
 import type { AgentRole, ReviewVerdict } from "../runtime/types";
 
@@ -88,8 +88,9 @@ export class DiscordNotifier implements RuntimeNotifier {
   private async send(channelId: string, message: string): Promise<void> {
     if (!channelId) return;
     const channel = await this.client.channels.fetch(channelId).catch(() => null);
-    if (!channel || !("send" in channel)) return;
-    await (channel as TextBasedChannel).send(message);
+    const sendable = channel as { send?: (content: string) => Promise<unknown> } | null;
+    if (typeof sendable?.send !== "function") return;
+    await sendable.send(message);
   }
 }
 
