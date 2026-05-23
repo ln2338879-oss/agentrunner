@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+const OptionalWorkerRoleSchema = z.preprocess(
+  (value) => value === "" ? undefined : value,
+  z.enum(["director", "builder", "factory"]).optional(),
+);
+
 const ConfigSchema = z.object({
   DIRECTOR_DISCORD_TOKEN: z.string().optional().default(""),
   BUILDER_DISCORD_TOKEN: z.string().optional().default(""),
@@ -47,7 +52,7 @@ const ConfigSchema = z.object({
   APPROVED_TASK_COMMAND: z.string().optional().default(""),
   APPROVED_TASK_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
   REQUIRE_USER_APPROVAL_BEFORE_COMMIT: z.coerce.boolean().default(true),
-  AGENTRUNNER_WORKER_ROLE: z.enum(["director", "builder", "factory"]).optional(),
+  AGENTRUNNER_WORKER_ROLE: OptionalWorkerRoleSchema,
 });
 
 export type RuntimeConfig = z.infer<typeof ConfigSchema>;
