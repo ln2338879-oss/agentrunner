@@ -43,12 +43,17 @@ User Report
 - Bun + TypeScript 프로젝트 구조
 - Director / Builder / Factory 3봇 로그인 구조
 - Discord Director Bot 메시지 수신
+- Discord `!tasks`, `!task`, `!help` 상태 명령어
 - 작업 분류 라우터
 - SQLite WAL 런타임 스키마
 - task_runs / messages / reviews / artifacts 기록
 - locked_by / lock_expires_at 기반 task lease
+- 재시작 시 stale task 복구
+- Discord 채널별 runtime notification
 - Obsidian Vault 폴더/노트 생성기
 - 작업, 리뷰, 보고서 Markdown 템플릿
+- 승인 완료 노트 생성
+- Obsidian Dataview dashboard 템플릿 문서
 - Director / Builder / Factory Agent Adapter 인터페이스
 - ClaudeCode CLI 실행 어댑터
 - Codex CLI 실행 어댑터
@@ -56,6 +61,7 @@ User Report
 - Director verdict 기반 자동 리뷰 루프
 - NEEDS_REVISION 재작업 루프
 - Builder diff/test/build validation report
+- 승인 후 Git/PR hook 예시 스크립트
 - GitHub Actions typecheck/test 체크
 
 ## 빠른 시작
@@ -102,6 +108,24 @@ BUILDER_TEST_COMMAND=
 BUILDER_BUILD_COMMAND=
 ```
 
+승인 후 훅 예시:
+
+```env
+APPROVED_TASK_COMMAND=bash scripts/approved-task-git-pr.sh
+```
+
+## Discord 명령어
+
+Director 채널에서 사용할 수 있습니다.
+
+```text
+!help
+!tasks
+!task TASK-...
+```
+
+일반 메시지는 새 게임 개발 작업으로 생성됩니다.
+
 ## 런타임 구조
 
 ```text
@@ -114,7 +138,9 @@ src/
     runtime-store.ts
     schema.ts
   discord/
+    commands.ts
     director-bot.ts
+    notifier.ts
     worker-bot.ts
   obsidian/
     vault-manager.ts
@@ -151,9 +177,13 @@ AgentRunnerVault/
   04_Reviews/
   05_BuilderReports/
   06_FactoryOutputs/
+  07_Approved/
+  08_Recovery/
   90_Prompts/
   99_System/
 ```
+
+Dataview 템플릿은 `docs/obsidian-dataview-dashboard.md`에 있습니다.
 
 ## 리뷰 루프
 
@@ -167,17 +197,19 @@ VERDICT: BLOCKED
 
 `NEEDS_REVISION`이면 Orchestrator가 Director 피드백을 포함한 수정 프롬프트를 만들고 같은 worker를 다시 실행합니다. 이 과정은 `MAX_REVIEW_ROUNDS`까지 반복됩니다.
 
-## Task Lease
+## Task Lease와 복구
 
 AgentRunner는 `locked_by`, `lock_expires_at`을 사용해 task lease를 관리합니다. Orchestrator는 worker 실행 전에 lease를 획득하고, 각 revision round 전에 lease를 갱신하며, 작업 종료 시 lease를 해제합니다.
 
+시작 시 `RECOVER_STALE_TASKS_ON_START=true`이면 오래 멈춘 `running` 또는 `needs_revision` 작업을 `blocked`로 전환하고 `08_Recovery/`에 복구 리포트를 남깁니다.
+
 ## 다음 개발 우선순위
 
-1. 재시작 후 running/locked task 복구
-2. Discord 채널별 상세 로그 라우팅
-3. GitHub PR 생성/커밋 승인 플로우
-4. Obsidian Dataview 템플릿
-5. 대시보드 추가
+1. 실제 GitHub PR 자동 생성까지 연결
+2. 실행 중인 task를 blocked가 아니라 이어서 resume
+3. Discord slash command 지원
+4. 웹 dashboard 추가
+5. 실제 CI/typecheck 결과 기반 버그 수정
 
 ## 보안 주의
 
