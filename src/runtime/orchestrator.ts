@@ -3,12 +3,13 @@ import { RuntimeStore } from "../db/runtime-store";
 import type { RuntimeNotifier } from "../discord/notifier";
 import { NullNotifier } from "../discord/notifier";
 import type { GroupConfigManager } from "../groups/group-config";
-import { loadSkillContext } from "../skills/context";
 import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
 import { runDirectorReview } from "../review/review-loop";
 import { classifyTask } from "../router/classify";
+import { loadSkillContext } from "../skills/context";
 import { runShellCommand } from "../utils/command";
+import { appendVisionAnalysis } from "../vision/adapter";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./types";
 
 export class Orchestrator {
@@ -83,9 +84,13 @@ export class Orchestrator {
       skillsDir: this.config.SKILLS_DIR,
       skillIds: group?.skills ?? [],
     });
-    const effectiveContent = skillContext
+    const baseEffectiveContent = skillContext
       ? [skillContext, "", "# User Request", "", input.content].join("\n")
       : input.content;
+    const effectiveContent = await appendVisionAnalysis({
+      content: baseEffectiveContent,
+      config: this.config,
+    });
 
     const classified = classifyTask(input.content);
     const taskId = `TASK-${Date.now()}`;
