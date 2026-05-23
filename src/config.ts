@@ -17,6 +17,8 @@ const ConfigSchema = z.object({
   PROJECT_ROOT: z.string().default("./game-project"),
   GROUPS_CONFIG_PATH: z.string().optional().default("./configs/groups.yaml"),
   SKILLS_DIR: z.string().optional().default("./skills"),
+  ATTACHMENTS_DIR: z.string().optional().default("./data/attachments"),
+  MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(10_000_000),
   OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434/v1"),
   OLLAMA_MODEL: z.string().default("gemma"),
   CLAUDE_CODE_COMMAND: z.string().default("claude"),
