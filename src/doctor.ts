@@ -26,16 +26,8 @@ async function main(): Promise<void> {
   results.push(await checkCommand("ClaudeCode command", config.CLAUDE_CODE_COMMAND));
   results.push(await checkCommand("Codex command", config.CODEX_COMMAND));
   results.push(await checkOllamaEndpoint(config.OLLAMA_BASE_URL));
-
-  if (config.VISION_COMMAND) {
-    results.push(await checkCommand("Vision command", config.VISION_COMMAND));
-  } else {
-    results.push({
-      name: "Vision command",
-      ok: true,
-      detail: "VISION_COMMAND is empty; image analysis command is disabled.",
-    });
-  }
+  results.push(await checkOptionalCommand("Vision command", config.VISION_COMMAND, "VISION_COMMAND is empty; image analysis command is disabled."));
+  results.push(await checkOptionalCommand("Browser command", config.BROWSER_COMMAND, "BROWSER_COMMAND is empty; browser context command is disabled."));
 
   printResults(results);
 
@@ -84,6 +76,11 @@ async function checkCommand(name: string, command: string): Promise<CheckResult>
     ok: result.ok,
     detail: result.ok ? `${binary} found.` : `${binary} not found. ${result.stderr.trim()}`.trim(),
   };
+}
+
+async function checkOptionalCommand(name: string, command: string, disabledDetail: string): Promise<CheckResult> {
+  if (!command) return { name, ok: true, detail: disabledDetail };
+  return await checkCommand(name, command);
 }
 
 async function checkOllamaEndpoint(baseUrl: string): Promise<CheckResult> {
