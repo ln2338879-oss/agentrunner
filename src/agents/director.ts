@@ -1,7 +1,7 @@
 import type { RuntimeConfig } from "../config";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
 import { buildCliPrompt } from "../utils/prompt";
-import { runShellCommand } from "../utils/command";
+import { formatFailoverHeader, parseCommandCandidates, runCommandWithFailover } from "./failover";
 
 export class DirectorAgent implements AgentAdapter {
   readonly role = "director" as const;
@@ -16,17 +16,18 @@ export class DirectorAgent implements AgentAdapter {
       workspacePath: input.workspacePath,
     });
 
-    const result = await runShellCommand({
-      command: this.config.CLAUDE_CODE_COMMAND,
+    const candidate = await runCommandWithFailover({
+      commands: parseCommandCandidates(this.config.CLAUDE_CODE_COMMAND, this.config.CLAUDE_CODE_COMMANDS),
       cwd: input.workspacePath ?? this.config.PROJECT_ROOT,
-      input: prompt,
+      prompt,
       timeoutMs: this.config.AI_COMMAND_TIMEOUT_MS,
+      enabled: this.config.ENABLE_AGENT_FAILOVER,
     });
 
     return {
-      ok: result.ok,
-      output: result.stdout || result.stderr,
-      error: result.ok ? undefined : formatCliError(result),
+      ok: candidate.result.ok,
+      output: formatFailoverHeader(candidate) + (candidate.result.stdout || candidate.result.stderr),
+      error: candidate.result.ok ? undefined : formatCliError(candidate.result),
     };
   }
 }
