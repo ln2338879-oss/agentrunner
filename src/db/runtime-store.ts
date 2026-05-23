@@ -113,6 +113,28 @@ export class RuntimeStore {
     });
   }
 
+  recoverStaleTasks(input: { staleMinutes: number }): Array<{ id: string; status: string; lockedBy: string | null }> {
+    const staleBefore = new Date(Date.now() - input.staleMinutes * 60_000).toISOString();
+    const rows = this.db.query(`
+      SELECT id, status, locked_by as lockedBy
+      FROM tasks
+      WHERE status IN ('running', 'needs_revision')
+        AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
+    `).all({ $staleBefore: staleBefore }) as Array<{ id: string; status: string; lockedBy: string | null }>;
+
+    this.db.query(`
+      UPDATE tasks
+      SET status = 'blocked', locked_by = NULL, lock_expires_at = NULL, updated_at = $updatedAt
+      WHERE status IN ('running', 'needs_revision')
+        AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
+    `).run({
+      $staleBefore: staleBefore,
+      $updatedAt: new Date().toISOString(),
+    });
+
+    return rows;
+  }
+
   recordTaskRun(input: {
     id: string;
     taskId: string;
