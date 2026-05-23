@@ -7,6 +7,7 @@ import { FactoryAgent } from "./agents/factory";
 import { Orchestrator } from "./runtime/orchestrator";
 import { createDirectorBot } from "./discord/director-bot";
 import { createWorkerBot } from "./discord/worker-bot";
+import { DiscordNotifier } from "./discord/notifier";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -17,14 +18,16 @@ async function main(): Promise<void> {
   orchestrator.registerAgent(new DirectorAgent(config));
   orchestrator.registerAgent(new BuilderAgent(config));
   orchestrator.registerAgent(new FactoryAgent(config));
-  await orchestrator.initialize();
 
   const loginPromises: Promise<string>[] = [];
 
   if (config.DIRECTOR_DISCORD_TOKEN) {
     const directorBot = createDirectorBot(config, orchestrator);
+    orchestrator.setNotifier(new DiscordNotifier(directorBot, config));
     loginPromises.push(directorBot.login(config.DIRECTOR_DISCORD_TOKEN));
   }
+
+  await orchestrator.initialize();
 
   if (config.BUILDER_DISCORD_TOKEN) {
     const builderBot = createWorkerBot({
