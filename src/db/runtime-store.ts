@@ -67,6 +67,52 @@ export class RuntimeStore {
     `).run({ $id: id, $round: round, $updatedAt: new Date().toISOString() });
   }
 
+  acquireTaskLease(input: { taskId: string; owner: string; ttlMinutes: number }): boolean {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + input.ttlMinutes * 60_000).toISOString();
+    const nowIso = now.toISOString();
+
+    const result = this.db.query(`
+      UPDATE tasks
+      SET locked_by = $owner, lock_expires_at = $expiresAt, updated_at = $nowIso
+      WHERE id = $taskId
+        AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso OR locked_by = $owner)
+    `).run({
+      $taskId: input.taskId,
+      $owner: input.owner,
+      $expiresAt: expiresAt,
+      $nowIso: nowIso,
+    });
+
+    return result.changes > 0;
+  }
+
+  refreshTaskLease(input: { taskId: string; owner: string; ttlMinutes: number }): void {
+    const expiresAt = new Date(Date.now() + input.ttlMinutes * 60_000).toISOString();
+    this.db.query(`
+      UPDATE tasks
+      SET lock_expires_at = $expiresAt, updated_at = $updatedAt
+      WHERE id = $taskId AND locked_by = $owner
+    `).run({
+      $taskId: input.taskId,
+      $owner: input.owner,
+      $expiresAt: expiresAt,
+      $updatedAt: new Date().toISOString(),
+    });
+  }
+
+  releaseTaskLease(input: { taskId: string; owner: string }): void {
+    this.db.query(`
+      UPDATE tasks
+      SET locked_by = NULL, lock_expires_at = NULL, updated_at = $updatedAt
+      WHERE id = $taskId AND locked_by = $owner
+    `).run({
+      $taskId: input.taskId,
+      $owner: input.owner,
+      $updatedAt: new Date().toISOString(),
+    });
+  }
+
   recordTaskRun(input: {
     id: string;
     taskId: string;
