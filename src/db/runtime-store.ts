@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { Database } from "bun:sqlite";
 import { runtimeSchemaSql } from "./schema";
+import { extendedRuntimeSchemaSql } from "./extended-schema";
 import type { AgentRole, ReviewVerdict, RuntimeTask, TaskStatus, TaskType } from "../runtime/types";
 
 export interface TaskSummaryRow {
@@ -48,6 +49,7 @@ export class RuntimeStore {
 
   migrate(): void {
     this.db.exec(runtimeSchemaSql);
+    this.db.exec(extendedRuntimeSchemaSql);
   }
 
   createTask(input: {
