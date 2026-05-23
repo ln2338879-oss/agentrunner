@@ -1,0 +1,40 @@
+groups:
+  - id: runebound-dev
+    name: Runebound Development
+    discordChannelIds:
+      - "000000000000000000"
+    projectRoot: /opt/game-projects/runebound
+    obsidianVaultPath: /opt/obsidian-vaults/AgentRunnerVault
+    factoryModel: gemma
+    builderTestCommand: bun test
+    builderBuildCommand: bun run build
+    allowedRoles:
+      - director
+      - builder
+      - factory
+    skills:
+      - runebound-design
+      - item-schema
+      - code-style
+    policy:
+      allowCodeChanges: true
+      allowContentGeneration: true
+      requireDirectorReview: true
+
+  - id: content-lab
+    name: Content Factory Lab
+    discordChannelIds:
+      - "111111111111111111"
+    projectRoot: /opt/game-projects/runebound
+    obsidianVaultPath: /opt/obsidian-vaults/AgentRunnerVault
+    factoryModel: gemma
+    allowedRoles:
+      - director
+      - factory
+    skills:
+      - content-style
+      - monster-schema
+    policy:
+      allowCodeChanges: false
+      allowContentGeneration: true
+      requireDirectorReview: true
