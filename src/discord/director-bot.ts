@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits } from "discord.js";
 import { RuntimeConfig } from "../config";
 import type { RuntimeStore } from "../db/runtime-store";
-import { buildAttachmentContext } from "./attachments";
+import { persistAttachmentContext } from "./attachments";
 import { handleDirectorCommand, isCommand, parseRetryCommand } from "./commands";
 import { Orchestrator } from "../runtime/orchestrator";
 
@@ -90,7 +90,12 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
     if (config.GAME_DIRECTOR_CHANNEL_ID && message.channelId !== config.GAME_DIRECTOR_CHANNEL_ID) return;
 
     try {
-      const attachmentContext = buildAttachmentContext(message.attachments);
+      const attachmentContext = await persistAttachmentContext({
+        attachments: message.attachments,
+        attachmentsDir: config.ATTACHMENTS_DIR,
+        messageId: message.id,
+        maxAttachmentBytes: config.MAX_ATTACHMENT_BYTES,
+      });
       const userContent = withAttachmentContext(message.content, attachmentContext.markdown);
       const retryTaskId = parseRetryCommand(message.content);
       if (retryTaskId) {
