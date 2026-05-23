@@ -15,6 +15,8 @@ const ConfigSchema = z.object({
   DATABASE_PATH: z.string().default("./data/agentrunner.sqlite"),
   OBSIDIAN_VAULT_PATH: z.string().default("./vault/AgentRunnerVault"),
   PROJECT_ROOT: z.string().default("./game-project"),
+  GROUPS_CONFIG_PATH: z.string().optional().default("./configs/groups.yaml"),
+  SKILLS_DIR: z.string().optional().default("./skills"),
   OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434/v1"),
   OLLAMA_MODEL: z.string().default("gemma"),
   CLAUDE_CODE_COMMAND: z.string().default("claude"),
