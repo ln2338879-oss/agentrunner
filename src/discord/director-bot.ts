@@ -90,13 +90,31 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
     if (config.GAME_DIRECTOR_CHANNEL_ID && message.channelId !== config.GAME_DIRECTOR_CHANNEL_ID) return;
 
     try {
+      const session = store.getOrCreateSession({
+        discordChannelId: message.channelId,
+        title: `Discord channel ${message.channelId}`,
+      });
+
+      const steer = parseSteeringCommand(message.content);
+      if (steer) {
+        store.recordSteeringMessage({
+          id: `STEER-${Date.now()}`,
+          taskId: steer.taskId,
+          discordMessageId: message.id,
+          content: steer.content,
+        });
+        await message.reply(`Steering queued for ${steer.taskId}.`);
+        return;
+      }
+
       const attachmentContext = await persistAttachmentContext({
         attachments: message.attachments,
         attachmentsDir: config.ATTACHMENTS_DIR,
         messageId: message.id,
         maxAttachmentBytes: config.MAX_ATTACHMENT_BYTES,
       });
-      const userContent = withAttachmentContext(message.content, attachmentContext.markdown);
+      const contentWithAttachments = withAttachmentContext(message.content, attachmentContext.markdown);
+      const userContent = withSessionContext(contentWithAttachments, store, session.id);
       const retryTaskId = parseRetryCommand(message.content);
       if (retryTaskId) {
         const task = store.getTask(retryTaskId);
@@ -106,7 +124,11 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
         }
 
         const result = await orchestrator.handleUserRequest({
-          content: withAttachmentContext(buildRetryContent(retryTaskId, task), attachmentContext.markdown),
+          content: withSessionContext(
+            withAttachmentContext(buildRetryContent(retryTaskId, task), attachmentContext.markdown),
+            store,
+            session.id,
+          ),
           discordMessageId: message.id,
           discordChannelId: message.channelId,
         });
@@ -122,6 +144,15 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
           return;
         }
       }
+
+      store.recordMessage({
+        id: `MSG-${message.id}`,
+        discordMessageId: message.id,
+        discordChannelId: message.channelId,
+        sessionId: session.id,
+        senderRole: "director",
+        content: message.content,
+      });
 
       const result = await orchestrator.handleUserRequest({
         content: userContent,
@@ -142,6 +173,27 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
 function withAttachmentContext(content: string, attachmentContext: string): string {
   if (!attachmentContext) return content;
   return [content, "", attachmentContext].join("\n");
+}
+
+function withSessionContext(content: string, store: RuntimeStore, sessionId: string): string {
+  const messages = store.listRecentSessionMessages(sessionId, 6).reverse();
+  if (messages.length === 0) return content;
+
+  return [
+    "# Session Context",
+    "",
+    ...messages.map((message) => `- ${message.createdAt} ${message.senderRole ?? "user"}: ${message.content}`),
+    "",
+    "# Current Message",
+    "",
+    content,
+  ].join("\n");
+}
+
+function parseSteeringCommand(content: string): { taskId: string; content: string } | null {
+  const match = content.trim().match(/^!steer\s+(TASK-\S+)\s+([\s\S]+)$/i);
+  if (!match) return null;
+  return { taskId: match[1], content: match[2].trim() };
 }
 
 function buildRetryContent(taskId: string, task: ReturnType<RuntimeStore["getTask"]>): string {
