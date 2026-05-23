@@ -4,6 +4,12 @@ export function isCommand(content: string): boolean {
   return content.trim().startsWith("!");
 }
 
+export function parseRetryCommand(content: string): string | null {
+  const parts = content.trim().split(/\s+/);
+  if (parts[0]?.toLowerCase() !== "!retry") return null;
+  return parts[1] ?? null;
+}
+
 export async function handleDirectorCommand(input: {
   content: string;
   store: RuntimeStore;
@@ -16,6 +22,7 @@ export async function handleDirectorCommand(input: {
       "AgentRunner commands:",
       "`!tasks` - 최근 작업 10개 보기",
       "`!task <TASK-ID>` - 특정 작업 상세 보기",
+      "`!retry <TASK-ID>` - 기존 작업을 새 작업으로 재시도",
       "`!help` - 명령어 보기",
       "",
       "일반 메시지는 새 게임 개발 작업으로 생성됩니다.",
@@ -55,6 +62,12 @@ export async function handleDirectorCommand(input: {
       artifacts.length > 0 ? "Artifacts:\n" + artifacts.map((item) => `- ${item.type}: ${item.path}`).join("\n") : "Artifacts: none",
       reviews.length > 0 ? "Reviews:\n" + reviews.map((item) => `- round ${item.round}: ${item.verdict}`).join("\n") : "Reviews: none",
     ].join("\n");
+  }
+
+  if (command === "!retry") {
+    const taskId = parts[1];
+    if (!taskId) return "사용법: `!retry TASK-...`";
+    return null;
   }
 
   return null;
