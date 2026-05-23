@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits } from "discord.js";
 import { RuntimeConfig } from "../config";
 import type { RuntimeStore } from "../db/runtime-store";
+import { buildAttachmentContext } from "./attachments";
 import { handleDirectorCommand, isCommand, parseRetryCommand } from "./commands";
 import { Orchestrator } from "../runtime/orchestrator";
 
@@ -89,6 +90,8 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
     if (config.GAME_DIRECTOR_CHANNEL_ID && message.channelId !== config.GAME_DIRECTOR_CHANNEL_ID) return;
 
     try {
+      const attachmentContext = buildAttachmentContext(message.attachments);
+      const userContent = withAttachmentContext(message.content, attachmentContext.markdown);
       const retryTaskId = parseRetryCommand(message.content);
       if (retryTaskId) {
         const task = store.getTask(retryTaskId);
@@ -98,7 +101,7 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
         }
 
         const result = await orchestrator.handleUserRequest({
-          content: buildRetryContent(retryTaskId, task),
+          content: withAttachmentContext(buildRetryContent(retryTaskId, task), attachmentContext.markdown),
           discordMessageId: message.id,
           discordChannelId: message.channelId,
         });
@@ -116,7 +119,7 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
       }
 
       const result = await orchestrator.handleUserRequest({
-        content: message.content,
+        content: userContent,
         discordMessageId: message.id,
         discordChannelId: message.channelId,
       });
@@ -129,6 +132,11 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
   });
 
   return client;
+}
+
+function withAttachmentContext(content: string, attachmentContext: string): string {
+  if (!attachmentContext) return content;
+  return [content, "", attachmentContext].join("\n");
 }
 
 function buildRetryContent(taskId: string, task: ReturnType<RuntimeStore["getTask"]>): string {
