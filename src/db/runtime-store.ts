@@ -4,6 +4,34 @@ import { Database } from "bun:sqlite";
 import { runtimeSchemaSql } from "./schema";
 import type { AgentRole, ReviewVerdict, RuntimeTask, TaskStatus, TaskType } from "../runtime/types";
 
+export interface TaskSummaryRow {
+  id: string;
+  title: string;
+  type: string;
+  status: string;
+  assignedTo: string;
+  currentRound: number;
+  obsidianPath: string;
+  lockedBy: string | null;
+  lockExpiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ArtifactRow {
+  type: string;
+  path: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface ReviewRow {
+  verdict: string;
+  round: number;
+  feedback: string;
+  createdAt: string;
+}
+
 export class RuntimeStore {
   private readonly db: Database;
 
@@ -65,6 +93,63 @@ export class RuntimeStore {
     this.db.query(`
       UPDATE tasks SET current_round = $round, updated_at = $updatedAt WHERE id = $id
     `).run({ $id: id, $round: round, $updatedAt: new Date().toISOString() });
+  }
+
+  getTask(id: string): TaskSummaryRow | null {
+    return this.db.query(`
+      SELECT
+        id,
+        title,
+        type,
+        status,
+        assigned_to as assignedTo,
+        current_round as currentRound,
+        obsidian_path as obsidianPath,
+        locked_by as lockedBy,
+        lock_expires_at as lockExpiresAt,
+        created_at as createdAt,
+        updated_at as updatedAt
+      FROM tasks
+      WHERE id = $id
+    `).get({ $id: id }) as TaskSummaryRow | null;
+  }
+
+  listRecentTasks(limit = 10): TaskSummaryRow[] {
+    return this.db.query(`
+      SELECT
+        id,
+        title,
+        type,
+        status,
+        assigned_to as assignedTo,
+        current_round as currentRound,
+        obsidian_path as obsidianPath,
+        locked_by as lockedBy,
+        lock_expires_at as lockExpiresAt,
+        created_at as createdAt,
+        updated_at as updatedAt
+      FROM tasks
+      ORDER BY created_at DESC
+      LIMIT $limit
+    `).all({ $limit: limit }) as TaskSummaryRow[];
+  }
+
+  listTaskArtifacts(taskId: string): ArtifactRow[] {
+    return this.db.query(`
+      SELECT type, path, created_by as createdBy, created_at as createdAt
+      FROM artifacts
+      WHERE task_id = $taskId
+      ORDER BY created_at ASC
+    `).all({ $taskId: taskId }) as ArtifactRow[];
+  }
+
+  listTaskReviews(taskId: string): ReviewRow[] {
+    return this.db.query(`
+      SELECT verdict, round, feedback, created_at as createdAt
+      FROM reviews
+      WHERE task_id = $taskId
+      ORDER BY round ASC, created_at ASC
+    `).all({ $taskId: taskId }) as ReviewRow[];
   }
 
   acquireTaskLease(input: { taskId: string; owner: string; ttlMinutes: number }): boolean {
