@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { Database } from "bun:sqlite";
 import { runtimeSchemaSql } from "./schema";
-import type { AgentRole, RuntimeTask, TaskStatus, TaskType } from "../runtime/types";
+import type { AgentRole, ReviewVerdict, RuntimeTask, TaskStatus, TaskType } from "../runtime/types";
 
 export class RuntimeStore {
   private readonly db: Database;
@@ -59,6 +59,81 @@ export class RuntimeStore {
     this.db.query(`
       UPDATE tasks SET status = $status, updated_at = $updatedAt WHERE id = $id
     `).run({ $id: id, $status: status, $updatedAt: new Date().toISOString() });
+  }
+
+  setTaskReviewRound(id: string, round: number): void {
+    this.db.query(`
+      UPDATE tasks SET current_round = $round, updated_at = $updatedAt WHERE id = $id
+    `).run({ $id: id, $round: round, $updatedAt: new Date().toISOString() });
+  }
+
+  recordTaskRun(input: {
+    id: string;
+    taskId: string;
+    role: AgentRole;
+    model?: string;
+    prompt: string;
+    output?: string;
+    status: "running" | "completed" | "failed";
+    error?: string;
+    startedAt: string;
+    finishedAt?: string;
+  }): void {
+    this.db.query(`
+      INSERT INTO task_runs (id, task_id, role, model, prompt, output, status, error, started_at, finished_at)
+      VALUES ($id, $taskId, $role, $model, $prompt, $output, $status, $error, $startedAt, $finishedAt)
+    `).run({
+      $id: input.id,
+      $taskId: input.taskId,
+      $role: input.role,
+      $model: input.model ?? null,
+      $prompt: input.prompt,
+      $output: input.output ?? null,
+      $status: input.status,
+      $error: input.error ?? null,
+      $startedAt: input.startedAt,
+      $finishedAt: input.finishedAt ?? null,
+    });
+  }
+
+  recordArtifact(input: {
+    id: string;
+    taskId: string;
+    type: string;
+    path: string;
+    createdBy: AgentRole;
+  }): void {
+    this.db.query(`
+      INSERT INTO artifacts (id, task_id, type, path, created_by, created_at)
+      VALUES ($id, $taskId, $type, $path, $createdBy, $createdAt)
+    `).run({
+      $id: input.id,
+      $taskId: input.taskId,
+      $type: input.type,
+      $path: input.path,
+      $createdBy: input.createdBy,
+      $createdAt: new Date().toISOString(),
+    });
+  }
+
+  recordReview(input: {
+    id: string;
+    taskId: string;
+    verdict: ReviewVerdict;
+    round: number;
+    feedback: string;
+  }): void {
+    this.db.query(`
+      INSERT INTO reviews (id, task_id, verdict, round, feedback, created_at)
+      VALUES ($id, $taskId, $verdict, $round, $feedback, $createdAt)
+    `).run({
+      $id: input.id,
+      $taskId: input.taskId,
+      $verdict: input.verdict,
+      $round: input.round,
+      $feedback: input.feedback,
+      $createdAt: new Date().toISOString(),
+    });
   }
 
   recordMessage(input: {
