@@ -1,0 +1,37 @@
+# Hermes provider example
+# This is a template only. Do not commit real API keys.
+
+providers:
+  anthropic:
+    type: "anthropic"
+    api_key_env: "ANTHROPIC_API_KEY"
+    default_model: "claude-sonnet"
+    role: "director"
+
+  openai:
+    type: "openai"
+    api_key_env: "OPENAI_API_KEY"
+    default_model: "codex"
+    role: "builder"
+
+  ollama:
+    type: "openai_compatible"
+    base_url: "http://localhost:11434/v1"
+    api_key: "ollama"
+    default_model: "gemma"
+    role: "factory"
+
+model_routing:
+  planning: "anthropic"
+  review: "anthropic"
+  implementation: "openai"
+  debugging: "openai"
+  bulk_generation: "ollama"
+  data_drafts: "ollama"
+
+security:
+  never_commit:
+    - ".env"
+    - "*.key"
+    - "*token*"
+    - "*secret*"
