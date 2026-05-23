@@ -6,7 +6,7 @@ import type { GroupConfigManager } from "../groups/group-config";
 import { loadSkillContext } from "../skills/context";
 import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
-import { runDirectorReview, statusFromVerdict } from "../review/review-loop";
+import { runDirectorReview } from "../review/review-loop";
 import { classifyTask } from "../router/classify";
 import { runShellCommand } from "../utils/command";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./types";
