@@ -2,6 +2,8 @@ import type { RuntimeConfig } from "../config";
 import { RuntimeStore } from "../db/runtime-store";
 import type { RuntimeNotifier } from "../discord/notifier";
 import { NullNotifier } from "../discord/notifier";
+import type { GroupConfigManager } from "../groups/group-config";
+import { loadSkillContext } from "../skills/context";
 import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
 import { runDirectorReview, statusFromVerdict } from "../review/review-loop";
@@ -12,6 +14,7 @@ import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./t
 export class Orchestrator {
   private readonly agents = new Map<AgentRole, AgentAdapter>();
   private notifier: RuntimeNotifier = new NullNotifier();
+  private groupConfig: GroupConfigManager | null = null;
 
   constructor(
     private readonly store: RuntimeStore,
@@ -27,7 +30,12 @@ export class Orchestrator {
     this.notifier = notifier;
   }
 
+  setGroupConfig(groupConfig: GroupConfigManager): void {
+    this.groupConfig = groupConfig;
+  }
+
   async initialize(): Promise<void> {
+    await this.groupConfig?.load();
     await this.vault.ensureDefaultFolders();
 
     if (this.config.RECOVER_STALE_TASKS_ON_START) {
@@ -70,11 +78,32 @@ export class Orchestrator {
     approvedPath?: string;
     verdict?: ReviewVerdict;
   }> {
+    const group = this.groupConfig?.resolveByChannel(input.discordChannelId) ?? null;
+    const skillContext = await loadSkillContext({
+      skillsDir: this.config.SKILLS_DIR,
+      skillIds: group?.skills ?? [],
+    });
+    const effectiveContent = skillContext
+      ? [skillContext, "", "# User Request", "", input.content].join("\n")
+      : input.content;
+
     const classified = classifyTask(input.content);
     const taskId = `TASK-${Date.now()}`;
     const title = input.content.slice(0, 60).replace(/\s+/g, " ") || "Untitled task";
     const obsidianPath = `01_Tasks/${taskId}.md`;
     const leaseOwner = `orchestrator:${classified.assignedTo}`;
+
+    if (group && !group.allowedRoles.includes(classified.assignedTo)) {
+      throw new Error(`Role ${classified.assignedTo} is not allowed in group ${group.id}.`);
+    }
+
+    if (group && classified.assignedTo === "builder" && !group.policy.allowCodeChanges) {
+      throw new Error(`Code changes are disabled in group ${group.id}.`);
+    }
+
+    if (group && classified.assignedTo === "factory" && !group.policy.allowContentGeneration) {
+      throw new Error(`Content generation is disabled in group ${group.id}.`);
+    }
 
     this.store.createTask({
       id: taskId,
@@ -113,7 +142,7 @@ export class Orchestrator {
           title,
           type: classified.type,
           assignedTo: classified.assignedTo,
-          request: input.content,
+          request: effectiveContent,
           discordMessageId: input.discordMessageId,
           discordChannelId: input.discordChannelId,
         }),
@@ -127,7 +156,7 @@ export class Orchestrator {
       });
 
       const agent = this.requireAgent(classified.assignedTo);
-      let prompt = input.content;
+      let prompt = effectiveContent;
       let latestReportPath = "";
       let latestReviewPath: string | undefined;
       let latestVerdict: ReviewVerdict | undefined;
@@ -164,7 +193,7 @@ export class Orchestrator {
 
         const review = await runDirectorReview({
           taskId,
-          originalPrompt: input.content,
+          originalPrompt: effectiveContent,
           workerRole: classified.assignedTo,
           workerOutput: result.result.output,
           director: this.requireAgent("director"),
@@ -228,7 +257,7 @@ export class Orchestrator {
 
         this.store.updateTaskStatus(taskId, "needs_revision");
         prompt = buildRevisionPrompt({
-          originalPrompt: input.content,
+          originalPrompt: effectiveContent,
           previousOutput: result.result.output,
           reviewFeedback: review.output,
           round,
