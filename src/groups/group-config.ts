@@ -4,6 +4,12 @@ import { parse } from "yaml";
 import { z } from "zod";
 import type { RuntimeConfig } from "../config";
 
+const DefaultGroupPolicy = {
+  allowCodeChanges: true,
+  allowContentGeneration: true,
+  requireDirectorReview: true,
+};
+
 const GroupConfigSchema = z.object({
   groups: z.array(z.object({
     id: z.string(),
@@ -20,7 +26,7 @@ const GroupConfigSchema = z.object({
       allowCodeChanges: z.boolean().default(true),
       allowContentGeneration: z.boolean().default(true),
       requireDirectorReview: z.boolean().default(true),
-    }).default({}),
+    }).default(DefaultGroupPolicy),
   })).default([]),
 });
 
