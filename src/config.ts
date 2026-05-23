@@ -19,9 +19,13 @@ const ConfigSchema = z.object({
   AI_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
   MAX_REVIEW_ROUNDS: z.coerce.number().int().positive().default(3),
   TASK_LEASE_MINUTES: z.coerce.number().int().positive().default(30),
+  RECOVER_STALE_TASKS_ON_START: z.coerce.boolean().default(true),
+  STALE_TASK_MINUTES: z.coerce.number().int().positive().default(120),
   BUILDER_TEST_COMMAND: z.string().optional().default(""),
   BUILDER_BUILD_COMMAND: z.string().optional().default(""),
   BUILDER_DIFF_COMMAND: z.string().optional().default("git diff --stat && git diff --name-only"),
+  APPROVED_TASK_COMMAND: z.string().optional().default(""),
+  APPROVED_TASK_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
   REQUIRE_USER_APPROVAL_BEFORE_COMMIT: z.coerce.boolean().default(true),
 });
 
