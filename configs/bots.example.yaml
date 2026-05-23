@@ -1,0 +1,57 @@
+# Example bot configuration for AgentRunner
+# Do not commit real tokens or API keys.
+
+bots:
+  director:
+    name: "ClaudeCode Director"
+    provider: "anthropic"
+    model: "claude-sonnet"
+    discord_channel: "game-director"
+    prompt_file: "prompts/claudecode-director.md"
+    responsibilities:
+      - planning
+      - game_design
+      - task_routing
+      - review
+      - final_approval
+
+  builder:
+    name: "Codex Builder"
+    provider: "openai"
+    model: "codex"
+    discord_channel: "dev-tasks"
+    prompt_file: "prompts/codex-builder.md"
+    responsibilities:
+      - implementation
+      - debugging
+      - tests
+      - build_fixes
+      - refactoring
+
+  factory:
+    name: "Ollama Factory"
+    provider: "ollama"
+    model: "gemma"
+    base_url: "http://localhost:11434/v1"
+    discord_channel: "content-factory"
+    prompt_file: "prompts/ollama-factory.md"
+    responsibilities:
+      - bulk_generation
+      - item_drafts
+      - monster_drafts
+      - dialogue_drafts
+      - json_csv_drafts
+
+routing:
+  default_entrypoint: "director"
+  final_review_required: true
+  allow_factory_final_approval: false
+  allow_builder_design_changes: false
+
+channels:
+  game_director: "#game-director"
+  dev_tasks: "#dev-tasks"
+  content_factory: "#content-factory"
+  review_log: "#review-log"
+  build_log: "#build-log"
+  archive: "#archive"
