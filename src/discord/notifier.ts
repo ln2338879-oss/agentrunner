@@ -13,13 +13,13 @@ export interface RuntimeNotifier {
 }
 
 export class NullNotifier implements RuntimeNotifier {
-  async taskCreated(): Promise<void> {}
-  async workerReport(): Promise<void> {}
-  async reviewResult(): Promise<void> {}
-  async approved(): Promise<void> {}
-  async blocked(): Promise<void> {}
-  async failed(): Promise<void> {}
-  async recovery(): Promise<void> {}
+  async taskCreated(_input: { taskId: string; role: AgentRole; obsidianPath: string; content: string }): Promise<void> {}
+  async workerReport(_input: { taskId: string; role: AgentRole; reportPath: string; round: number }): Promise<void> {}
+  async reviewResult(_input: { taskId: string; verdict: ReviewVerdict; reviewPath: string; round: number }): Promise<void> {}
+  async approved(_input: { taskId: string; approvedPath: string; reportPath: string; reviewPath: string }): Promise<void> {}
+  async blocked(_input: { taskId: string; reviewPath?: string; reason?: string }): Promise<void> {}
+  async failed(_input: { taskId: string; reportPath?: string; reason?: string }): Promise<void> {}
+  async recovery(_input: { count: number; path: string }): Promise<void> {}
 }
 
 export class DiscordNotifier implements RuntimeNotifier {
