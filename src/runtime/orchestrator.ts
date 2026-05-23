@@ -116,6 +116,7 @@ export class Orchestrator {
       type: classified.type,
       assignedTo: classified.assignedTo,
       obsidianPath,
+      groupId: group?.id,
     });
 
     const leaseAcquired = this.store.acquireTaskLease({
@@ -175,6 +176,7 @@ export class Orchestrator {
         });
 
         this.store.updateTaskStatus(taskId, "running");
+        prompt = appendSteeringContext(prompt, this.store.consumeSteeringMessages(taskId));
         const result = await this.runWorkerRound({
           taskId,
           role: classified.assignedTo,
@@ -464,5 +466,21 @@ function buildRevisionPrompt(input: {
     "",
     "## Director Feedback",
     input.reviewFeedback,
+  ].join("\n");
+}
+
+function appendSteeringContext(
+  prompt: string,
+  messages: Array<{ content: string; createdAt: string }>,
+): string {
+  if (messages.length === 0) return prompt;
+  return [
+    prompt,
+    "",
+    "# Mid-turn Steering",
+    "",
+    "Apply these user instructions before continuing the next worker round.",
+    "",
+    ...messages.map((message) => `- ${message.createdAt}: ${message.content}`),
   ].join("\n");
 }
