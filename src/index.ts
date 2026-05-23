@@ -5,6 +5,7 @@ import { DirectorAgent } from "./agents/director";
 import { BuilderAgent } from "./agents/builder";
 import { FactoryAgent } from "./agents/factory";
 import { Orchestrator } from "./runtime/orchestrator";
+import { GroupConfigManager } from "./groups/group-config";
 import { createDirectorBot } from "./discord/director-bot";
 import { createWorkerBot } from "./discord/worker-bot";
 import { DiscordNotifier } from "./discord/notifier";
@@ -15,7 +16,9 @@ async function main(): Promise<void> {
   const store = await RuntimeStore.open(config.DATABASE_PATH);
   const vault = new VaultManager(config.OBSIDIAN_VAULT_PATH);
   const orchestrator = new Orchestrator(store, vault, config);
+  const groupConfig = new GroupConfigManager(config);
 
+  orchestrator.setGroupConfig(groupConfig);
   orchestrator.registerAgent(new DirectorAgent(config));
   orchestrator.registerAgent(new BuilderAgent(config));
   orchestrator.registerAgent(new FactoryAgent(config));
