@@ -6,6 +6,7 @@ import { BuilderAgent } from "./agents/builder";
 import { FactoryAgent } from "./agents/factory";
 import { Orchestrator } from "./runtime/orchestrator";
 import { createDirectorBot } from "./discord/director-bot";
+import { createWorkerBot } from "./discord/worker-bot";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -18,13 +19,39 @@ async function main(): Promise<void> {
   orchestrator.registerAgent(new FactoryAgent());
   await orchestrator.initialize();
 
-  if (!config.DIRECTOR_DISCORD_TOKEN) {
-    console.log("AgentRunner initialized without Discord login. Set DIRECTOR_DISCORD_TOKEN to start the Director bot.");
+  const loginPromises: Promise<string>[] = [];
+
+  if (config.DIRECTOR_DISCORD_TOKEN) {
+    const directorBot = createDirectorBot(config, orchestrator);
+    loginPromises.push(directorBot.login(config.DIRECTOR_DISCORD_TOKEN));
+  }
+
+  if (config.BUILDER_DISCORD_TOKEN) {
+    const builderBot = createWorkerBot({
+      role: "builder",
+      token: config.BUILDER_DISCORD_TOKEN,
+      channelId: config.DEV_TASKS_CHANNEL_ID,
+      config,
+    });
+    loginPromises.push(builderBot.login(config.BUILDER_DISCORD_TOKEN));
+  }
+
+  if (config.FACTORY_DISCORD_TOKEN) {
+    const factoryBot = createWorkerBot({
+      role: "factory",
+      token: config.FACTORY_DISCORD_TOKEN,
+      channelId: config.CONTENT_FACTORY_CHANNEL_ID,
+      config,
+    });
+    loginPromises.push(factoryBot.login(config.FACTORY_DISCORD_TOKEN));
+  }
+
+  if (loginPromises.length === 0) {
+    console.log("AgentRunner initialized without Discord login. Set bot tokens in .env to start the 3-bot runtime.");
     return;
   }
 
-  const directorBot = createDirectorBot(config, orchestrator);
-  await directorBot.login(config.DIRECTOR_DISCORD_TOKEN);
+  await Promise.all(loginPromises);
 }
 
 main().catch((error) => {
