@@ -29,9 +29,11 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
       await message.reply([
         `작업 생성: ${result.taskId}`,
         `담당 역할: ${result.assignedTo}`,
+        result.verdict ? `Director 리뷰: ${result.verdict}` : undefined,
         `Obsidian Task: ${result.obsidianPath}`,
         `Report: ${result.reportPath}`,
-      ].join("\n"));
+        result.reviewPath ? `Review: ${result.reviewPath}` : undefined,
+      ].filter(Boolean).join("\n"));
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await message.reply(`AgentRunner 처리 실패: ${messageText}`);
