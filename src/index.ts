@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   const loginPromises: Promise<string>[] = [];
 
   if (config.DIRECTOR_DISCORD_TOKEN) {
-    const directorBot = createDirectorBot(config, orchestrator);
+    const directorBot = createDirectorBot(config, orchestrator, store);
     orchestrator.setNotifier(new DiscordNotifier(directorBot, config));
     loginPromises.push(directorBot.login(config.DIRECTOR_DISCORD_TOKEN));
   }
