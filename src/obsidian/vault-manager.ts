@@ -27,6 +27,8 @@ export class VaultManager {
       "04_Reviews",
       "05_BuilderReports",
       "06_FactoryOutputs",
+      "07_Approved",
+      "08_Recovery",
       "90_Prompts",
       "99_System",
     ].map((folder) => this.ensureFolder(folder)));
