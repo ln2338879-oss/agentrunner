@@ -95,7 +95,7 @@ describe("runDirectorReview", () => {
     fixture.store.createTask({
       id: "TASK-review-2",
       title: "Review failed output",
-      type: "code",
+      type: "implementation",
       assignedTo: "builder",
       obsidianPath: "01_Tasks/TASK-review-2.md",
     });
