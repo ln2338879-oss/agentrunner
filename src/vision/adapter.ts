@@ -38,7 +38,7 @@ export async function appendVisionAnalysis(input: {
   ].join("\n");
 }
 
-function extractImageLocalPaths(content: string): string[] {
+export function extractImageLocalPaths(content: string): string[] {
   const lines = content.split(/\r?\n/);
   const paths: string[] = [];
   let currentKind = "";
