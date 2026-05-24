@@ -39,7 +39,7 @@ export async function appendBrowserContext(input: {
   ].join("\n");
 }
 
-function extractUrls(content: string): string[] {
+export function extractUrls(content: string): string[] {
   const matches = content.match(/https?:\/\/[^\s)\]>"']+/g) ?? [];
   return [...new Set(matches.map((url) => url.replace(/[.,;:!?]+$/, "")))];
 }
