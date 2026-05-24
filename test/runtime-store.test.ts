@@ -44,7 +44,7 @@ describe("RuntimeStore task lifecycle", () => {
     store.createTask({
       id: "TASK-store-2",
       title: "Implement combat",
-      type: "code",
+      type: "implementation",
       assignedTo: "builder",
       obsidianPath: "01_Tasks/TASK-store-2.md",
     });
@@ -64,7 +64,7 @@ describe("RuntimeStore leases and recovery", () => {
     store.createTask({
       id: "TASK-lease-1",
       title: "Lease test",
-      type: "general",
+      type: "planning",
       assignedTo: "director",
       obsidianPath: "01_Tasks/TASK-lease-1.md",
     });
@@ -81,7 +81,7 @@ describe("RuntimeStore leases and recovery", () => {
     store.createTask({
       id: "TASK-recover-1",
       title: "Recover stale task",
-      type: "code",
+      type: "implementation",
       assignedTo: "builder",
       obsidianPath: "01_Tasks/TASK-recover-1.md",
     });
