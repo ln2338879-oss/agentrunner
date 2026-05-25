@@ -1,3 +1,5 @@
+import type { RuntimeConfig } from "../config";
+
 export type AgentRole = "director" | "builder" | "factory";
 
 export type TaskType = "planning" | "implementation" | "content" | "review";
@@ -30,6 +32,7 @@ export interface AgentRunInput {
   role: AgentRole;
   prompt: string;
   workspacePath?: string;
+  runtimeConfig?: RuntimeConfig;
   filesToInspect?: string[];
 }
 
