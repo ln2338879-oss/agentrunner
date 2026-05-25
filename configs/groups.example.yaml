@@ -9,6 +9,15 @@ profiles:
       allowCodeChanges: true
       allowContentGeneration: true
       requireDirectorReview: true
+      allowFileWrites: true
+      allowShellCommands: true
+      allowTests: true
+      allowBuilds: true
+      allowApprovedTaskCommand: true
+      allowSystemdRestart: false
+      allowNetworkAccess: false
+      requireHumanApprovalFor:
+        - systemd_restart
 
   - id: content-lab
     name: Content Lab
@@ -20,6 +29,14 @@ profiles:
       allowCodeChanges: false
       allowContentGeneration: true
       requireDirectorReview: true
+      allowFileWrites: true
+      allowShellCommands: false
+      allowTests: false
+      allowBuilds: false
+      allowApprovedTaskCommand: false
+      allowSystemdRestart: false
+      allowNetworkAccess: false
+      requireHumanApprovalFor: []
 
   - id: software-dev
     name: Software Development
@@ -31,6 +48,16 @@ profiles:
       allowCodeChanges: true
       allowContentGeneration: false
       requireDirectorReview: true
+      allowFileWrites: true
+      allowShellCommands: true
+      allowTests: true
+      allowBuilds: true
+      allowApprovedTaskCommand: true
+      allowSystemdRestart: false
+      allowNetworkAccess: false
+      requireHumanApprovalFor:
+        - approved_task_command
+        - systemd_restart
 
 groups:
   - id: runebound-dev
@@ -57,6 +84,8 @@ groups:
       allowCodeChanges: true
       allowContentGeneration: true
       requireDirectorReview: true
+      requireHumanApprovalFor:
+        - approved_task_command
 
   - id: content-lab
     name: Content Factory Lab
