@@ -1,17 +1,14 @@
 import { Client, GatewayIntentBits } from "discord.js";
 import { RuntimeConfig } from "../config";
 import type { RuntimeStore } from "../db/runtime-store";
+import { buildDesignChoiceReply } from "./design-choice";
 import { persistAttachmentContext } from "./attachments";
 import { handleDirectorCommand, isCommand, parseRetryCommand } from "./commands";
 import { Orchestrator } from "../runtime/orchestrator";
 
 export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestrator, store: RuntimeStore): Client {
   const client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent,
-    ],
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
   });
 
   client.once("ready", () => {
@@ -23,23 +20,19 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
 
     try {
       if (config.GAME_DIRECTOR_CHANNEL_ID && interaction.channelId !== config.GAME_DIRECTOR_CHANNEL_ID) {
-        await interaction.reply({ content: "AgentRunner Director 채널에서만 사용할 수 있습니다.", ephemeral: true });
+        await interaction.reply({ content: "Use AgentRunner in the Director channel.", ephemeral: true });
         return;
       }
 
-      if (interaction.commandName === "help") {
-        await interaction.reply(await handleDirectorCommand({ content: "!help", store }) ?? "명령어를 불러오지 못했습니다.");
-        return;
-      }
-
-      if (interaction.commandName === "tasks") {
-        await interaction.reply(await handleDirectorCommand({ content: "!tasks", store }) ?? "작업 목록을 불러오지 못했습니다.");
+      if (["help", "tasks"].includes(interaction.commandName)) {
+        const commandResult = await handleDirectorCommand({ content: `!${interaction.commandName}`, store });
+        await interaction.reply(commandResult ?? "Command failed.");
         return;
       }
 
       if (interaction.commandName === "task") {
         const taskId = interaction.options.getString("id", true);
-        await interaction.reply(await handleDirectorCommand({ content: `!task ${taskId}`, store }) ?? `작업을 찾을 수 없습니다: ${taskId}`);
+        await interaction.reply(await handleDirectorCommand({ content: `!task ${taskId}`, store }) ?? `Task not found: ${taskId}`);
         return;
       }
 
@@ -48,7 +41,7 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
         const taskId = interaction.options.getString("id", true);
         const task = store.getTask(taskId);
         if (!task) {
-          await interaction.editReply(`재시도할 작업을 찾을 수 없습니다: ${taskId}`);
+          await interaction.editReply(`Task not found: ${taskId}`);
           return;
         }
 
@@ -57,31 +50,33 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
           discordMessageId: interaction.id,
           discordChannelId: interaction.channelId,
         });
-
-        await interaction.editReply(formatTaskResult({ result, prefix: `재시도 작업 생성: ${result.taskId}\n원본 작업: ${taskId}` }));
+        await interaction.editReply(formatTaskResult({ result, prefix: `Retry task created: ${result.taskId}\nSource task: ${taskId}` }));
         return;
       }
 
       if (interaction.commandName === "run") {
-        await interaction.deferReply();
         const prompt = interaction.options.getString("prompt", true);
+        const designReply = buildDesignChoiceReply({ content: prompt, userId: interaction.user.id });
+        if (designReply) {
+          await interaction.reply(designReply);
+          return;
+        }
+
+        await interaction.deferReply();
         const result = await orchestrator.handleUserRequest({
           content: prompt,
           discordMessageId: interaction.id,
           discordChannelId: interaction.channelId,
         });
-        await interaction.editReply(formatTaskResult({ result, prefix: `작업 생성: ${result.taskId}` }));
+        await interaction.editReply(formatTaskResult({ result, prefix: `Task created: ${result.taskId}` }));
         return;
       }
 
-      await interaction.reply({ content: `알 수 없는 명령어: ${interaction.commandName}`, ephemeral: true });
+      await interaction.reply({ content: `Unknown command: ${interaction.commandName}`, ephemeral: true });
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply(`AgentRunner 처리 실패: ${messageText}`);
-      } else {
-        await interaction.reply({ content: `AgentRunner 처리 실패: ${messageText}`, ephemeral: true });
-      }
+      if (interaction.deferred || interaction.replied) await interaction.editReply(`AgentRunner failed: ${messageText}`);
+      else await interaction.reply({ content: `AgentRunner failed: ${messageText}`, ephemeral: true });
     }
   });
 
@@ -114,26 +109,20 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
         maxAttachmentBytes: config.MAX_ATTACHMENT_BYTES,
       });
       const contentWithAttachments = withAttachmentContext(message.content, attachmentContext.markdown);
-      const userContent = withSessionContext(contentWithAttachments, store, session.id);
       const retryTaskId = parseRetryCommand(message.content);
+
       if (retryTaskId) {
         const task = store.getTask(retryTaskId);
         if (!task) {
-          await message.reply(`재시도할 작업을 찾을 수 없습니다: ${retryTaskId}`);
+          await message.reply(`Task not found: ${retryTaskId}`);
           return;
         }
-
         const result = await orchestrator.handleUserRequest({
-          content: withSessionContext(
-            withAttachmentContext(buildRetryContent(retryTaskId, task), attachmentContext.markdown),
-            store,
-            session.id,
-          ),
+          content: withSessionContext(withAttachmentContext(buildRetryContent(retryTaskId, task), attachmentContext.markdown), store, session.id),
           discordMessageId: message.id,
           discordChannelId: message.channelId,
         });
-
-        await message.reply(formatTaskResult({ result, prefix: `재시도 작업 생성: ${result.taskId}\n원본 작업: ${retryTaskId}` }));
+        await message.reply(formatTaskResult({ result, prefix: `Retry task created: ${result.taskId}\nSource task: ${retryTaskId}` }));
         return;
       }
 
@@ -143,6 +132,12 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
           await message.reply(commandResult);
           return;
         }
+      }
+
+      const designReply = buildDesignChoiceReply({ content: contentWithAttachments, userId: message.author.id });
+      if (designReply) {
+        await message.reply(designReply);
+        return;
       }
 
       store.recordMessage({
@@ -155,15 +150,14 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
       });
 
       const result = await orchestrator.handleUserRequest({
-        content: userContent,
+        content: withSessionContext(contentWithAttachments, store, session.id),
         discordMessageId: message.id,
         discordChannelId: message.channelId,
       });
-
-      await message.reply(formatTaskResult({ result, prefix: `작업 생성: ${result.taskId}` }));
+      await message.reply(formatTaskResult({ result, prefix: `Task created: ${result.taskId}` }));
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
-      await message.reply(`AgentRunner 처리 실패: ${messageText}`);
+      await message.reply(`AgentRunner failed: ${messageText}`);
     }
   });
 
@@ -178,7 +172,6 @@ function withAttachmentContext(content: string, attachmentContext: string): stri
 function withSessionContext(content: string, store: RuntimeStore, sessionId: string): string {
   const messages = store.listRecentSessionMessages(sessionId, 6).reverse();
   if (messages.length === 0) return content;
-
   return [
     "# Session Context",
     "",
@@ -225,11 +218,11 @@ function formatTaskResult(input: {
 }): string {
   return [
     input.prefix,
-    `담당 역할: ${input.result.assignedTo}`,
-    input.result.verdict ? `Director 리뷰: ${input.result.verdict}` : undefined,
-    `Obsidian Task: ${input.result.obsidianPath}`,
+    `Role: ${input.result.assignedTo}`,
+    input.result.verdict ? `Director verdict: ${input.result.verdict}` : undefined,
+    `Task note: ${input.result.obsidianPath}`,
     `Report: ${input.result.reportPath}`,
     input.result.reviewPath ? `Review: ${input.result.reviewPath}` : undefined,
-    input.result.approvedPath ? `Approved: ${input.result.approvedPath}` : undefined,
+    input.result.approvedPath ? `Final: ${input.result.approvedPath}` : undefined,
   ].filter(Boolean).join("\n");
 }
