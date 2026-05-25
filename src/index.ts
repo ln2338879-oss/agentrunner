@@ -1,15 +1,14 @@
 import { loadConfig } from "./config";
 import { RuntimeStore } from "./db/runtime-store";
 import { VaultManager } from "./obsidian/vault-manager";
-import { DirectorAgent } from "./agents/director";
-import { BuilderAgent } from "./agents/builder";
-import { FactoryAgent } from "./agents/factory";
 import { Orchestrator } from "./runtime/orchestrator";
 import { GroupConfigManager } from "./groups/group-config";
 import { createDirectorBot } from "./discord/director-bot";
 import { createWorkerBot } from "./discord/worker-bot";
 import { DiscordNotifier } from "./discord/notifier";
 import { registerSlashCommands } from "./discord/slash-commands";
+import { RoleRegistry } from "./roles/registry";
+import { createDefaultProviderRegistry } from "./providers/registry";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -17,11 +16,13 @@ async function main(): Promise<void> {
   const vault = new VaultManager(config.OBSIDIAN_VAULT_PATH);
   const orchestrator = new Orchestrator(store, vault, config);
   const groupConfig = new GroupConfigManager(config);
+  const roleRegistry = await RoleRegistry.load({ path: config.ROLES_CONFIG_PATH });
+  const providerRegistry = createDefaultProviderRegistry();
 
   orchestrator.setGroupConfig(groupConfig);
-  orchestrator.registerAgent(new DirectorAgent(config));
-  orchestrator.registerAgent(new BuilderAgent(config));
-  orchestrator.registerAgent(new FactoryAgent(config));
+  for (const agent of providerRegistry.createDefaultAgents({ config, roleRegistry })) {
+    orchestrator.registerAgent(agent);
+  }
 
   await registerSlashCommands(config);
 
