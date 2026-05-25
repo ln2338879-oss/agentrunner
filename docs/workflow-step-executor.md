@@ -58,23 +58,49 @@ A workflow step is claimable when:
 Runtime workers use `AgentRole`, while workflow rows store resolved role ids.
 
 ```text
-director → planner
+director → planner, reviewer, arbiter
 builder  → builder
 factory  → generator
 designer → designer
 ```
 
+`director` intentionally claims multiple resolved role ids so one Director agent can execute planning, review, and arbitration steps.
+
+## Director step behavior
+
+`StepExecutor` now treats Director-family steps specially:
+
+```text
+plan      → planning prompt, normal workflow_step_report
+review    → verdict prompt, workflow_step_review + director_review
+arbitrate → verdict prompt, workflow_step_review + director_review
+```
+
+Review and arbitration steps must return a verdict line such as:
+
+```text
+VERDICT: APPROVED
+VERDICT: NEEDS_REVISION
+VERDICT: BLOCKED
+VERDICT: NEEDS_HUMAN
+VERDICT: SPLIT_TASK
+VERDICT: RETRY_WITH_DIFFERENT_AGENT
+```
+
+The verdict is parsed and reflected in task status. `APPROVED` marks the task approved and skips pending optional steps, such as `arbitrate-if-blocked`.
+
 ## Current execution behavior
 
 The stable Orchestrator loop still exists and still updates workflow step state.
 
-The new independent path is:
+The independent path is:
 
 ```text
 workflow step ledger
 → ready-step claim
 → role-specific worker execution
-→ workflow_step_report artifact
+→ workflow_step_report / workflow_step_review artifact
+→ dependent steps become claimable
 ```
 
 This means isolated workers can now execute a specific ready workflow step instead of only claiming whole pending tasks.
@@ -102,17 +128,19 @@ Implemented now:
 1. durable step leases
 2. ready-step dependency gating
 3. role-specific step claiming
-4. StepExecutor one-step execution
-5. worker poller step-first behavior
-6. step report artifacts
-7. failed required step marks task failed
+4. worker poller step-first behavior
+5. builder/factory/designer step execution
+6. director planner/reviewer/arbiter step execution
+7. review verdict parsing and task status updates
+8. step report and review artifacts
+9. failed required step marks task failed
 
 Still intentionally limited:
 
-1. Director/reviewer/arbiter step execution still needs a dedicated review-step executor path.
-2. Human approval gates are not yet first-class workflow steps.
-3. Parallel multi-step execution is now structurally possible but not yet coordinated by a scheduler process.
-4. Retry-with-different-agent still needs policy and provider fallback integration.
+1. Human approval gates are not yet first-class workflow steps.
+2. Parallel multi-step execution is now structurally possible but not yet coordinated by a scheduler process.
+3. Retry-with-different-agent still needs policy and provider fallback integration.
+4. Revision loops from independent review steps need a dedicated requeue/revision policy.
 
 ## Next phase
 
