@@ -18,6 +18,8 @@ export class FactoryAgent implements AgentAdapter {
   constructor(private readonly config: RuntimeConfig) {}
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
+    const config = input.runtimeConfig ?? this.config;
+
     const prompt = buildCliPrompt({
       role: "Factory",
       taskId: input.taskId,
@@ -25,17 +27,17 @@ export class FactoryAgent implements AgentAdapter {
       workspacePath: input.workspacePath,
     });
 
-    const cliCommands = parseCommandCandidates("", this.config.FACTORY_COMMANDS);
+    const cliCommands = parseCommandCandidates("", config.FACTORY_COMMANDS);
     if (cliCommands.length > 0) {
       const cliResult = await runCommandWithFailover({
         commands: cliCommands,
-        cwd: input.workspacePath ?? this.config.PROJECT_ROOT,
+        cwd: input.workspacePath ?? config.PROJECT_ROOT,
         prompt,
-        timeoutMs: this.config.AI_COMMAND_TIMEOUT_MS,
-        enabled: this.config.ENABLE_AGENT_FAILOVER,
+        timeoutMs: config.AI_COMMAND_TIMEOUT_MS,
+        enabled: config.ENABLE_AGENT_FAILOVER,
       });
 
-      if (cliResult.result.ok || !this.config.ENABLE_AGENT_FAILOVER) {
+      if (cliResult.result.ok || !config.ENABLE_AGENT_FAILOVER) {
         return {
           ok: cliResult.result.ok,
           output: formatFailoverHeader(cliResult) + (cliResult.result.stdout || cliResult.result.stderr),
@@ -44,18 +46,18 @@ export class FactoryAgent implements AgentAdapter {
       }
     }
 
-    return await this.runOllamaFailover(prompt);
+    return await this.runOllamaFailover(prompt, config);
   }
 
-  private async runOllamaFailover(prompt: string): Promise<AgentRunResult> {
-    const baseUrls = parsePipeList(this.config.OLLAMA_BASE_URL, this.config.OLLAMA_BASE_URLS);
-    const models = parsePipeList(this.config.OLLAMA_MODEL, this.config.OLLAMA_MODELS);
+  private async runOllamaFailover(prompt: string, config: RuntimeConfig): Promise<AgentRunResult> {
+    const baseUrls = parsePipeList(config.OLLAMA_BASE_URL, config.OLLAMA_BASE_URLS);
+    const models = parsePipeList(config.OLLAMA_MODEL, config.OLLAMA_MODELS);
     const failures: string[] = [];
 
     for (const baseUrl of baseUrls) {
       for (const model of models) {
         const result = await this.runOllamaOnce({ baseUrl, model, prompt });
-        if (result.ok || !this.config.ENABLE_AGENT_FAILOVER) return result;
+        if (result.ok || !config.ENABLE_AGENT_FAILOVER) return result;
         failures.push(result.error ?? `Factory candidate failed: ${baseUrl} ${model}`);
       }
     }
