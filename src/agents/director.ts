@@ -9,19 +9,21 @@ export class DirectorAgent implements AgentAdapter {
   constructor(private readonly config: RuntimeConfig) {}
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
+    const config = input.runtimeConfig ?? this.config;
+    const workspacePath = input.workspacePath ?? config.PROJECT_ROOT;
     const prompt = buildCliPrompt({
       role: "Director",
       taskId: input.taskId,
       prompt: input.prompt,
-      workspacePath: input.workspacePath,
+      workspacePath,
     });
 
     const candidate = await runCommandWithFailover({
-      commands: parseCommandCandidates(this.config.CLAUDE_CODE_COMMAND, this.config.CLAUDE_CODE_COMMANDS),
-      cwd: input.workspacePath ?? this.config.PROJECT_ROOT,
+      commands: parseCommandCandidates(config.CLAUDE_CODE_COMMAND, config.CLAUDE_CODE_COMMANDS),
+      cwd: workspacePath,
       prompt,
-      timeoutMs: this.config.AI_COMMAND_TIMEOUT_MS,
-      enabled: this.config.ENABLE_AGENT_FAILOVER,
+      timeoutMs: config.AI_COMMAND_TIMEOUT_MS,
+      enabled: config.ENABLE_AGENT_FAILOVER,
     });
 
     return {
