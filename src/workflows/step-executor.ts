@@ -1,8 +1,10 @@
 import type { RuntimeConfig } from "../config";
 import type { RuntimeStore, WorkflowStepRunRow } from "../db/runtime-store";
-import { botReportNote } from "../obsidian/templates";
+import { botReportNote, reviewNote } from "../obsidian/templates";
 import type { VaultManager } from "../obsidian/vault-manager";
-import type { AgentAdapter, AgentRole, AgentRunResult } from "../runtime/types";
+import { statusFromVerdict } from "../review/review-loop";
+import { parseReviewVerdict } from "../review/verdict";
+import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "../runtime/types";
 
 export interface StepExecutorOptions {
   role: AgentRole;
@@ -19,6 +21,7 @@ export interface StepExecutorResult {
   stepId?: string;
   status?: "completed" | "failed";
   reportPath?: string;
+  verdict?: ReviewVerdict;
   error?: string;
 }
 
@@ -26,12 +29,7 @@ export class StepExecutor {
   constructor(private readonly options: StepExecutorOptions) {}
 
   async runOnce(): Promise<StepExecutorResult> {
-    const step = this.options.store.claimReadyWorkflowStep({
-      roleId: claimRoleIdForAgentRole(this.options.role),
-      owner: this.options.owner,
-      ttlMinutes: this.options.config.TASK_LEASE_MINUTES,
-    });
-
+    const step = this.claimReadyStep();
     if (!step) return { claimed: false };
 
     const prompt = this.buildStepPrompt(step);
@@ -44,11 +42,13 @@ export class StepExecutor {
         prompt,
         workspacePath: this.options.config.PROJECT_ROOT,
       });
+      const output = result.output || result.error || "Step execution returned no output.";
       const reportPath = stepReportPath(step, this.options.role);
       const status = result.ok ? "completed" : "failed";
+      const verdict = isReviewAction(step.action) ? parseStepReviewVerdict(result, output) : undefined;
 
-      this.recordTaskRun({ step, prompt, result, status, startedAt });
-      await this.writeReport({ step, result, status, reportPath });
+      this.recordTaskRun({ step, prompt, result: { ...result, output }, status, startedAt });
+      await this.writeReport({ step, result: { ...result, output }, status, reportPath, verdict });
       this.recordArtifacts({ step, result, reportPath });
 
       if (result.ok) {
@@ -58,7 +58,8 @@ export class StepExecutor {
           owner: this.options.owner,
           outputRef: reportPath,
         });
-        this.completeTaskIfDone(step.taskId);
+        if (verdict) this.recordReviewVerdict({ step, verdict, output, reportPath });
+        else this.completeTaskIfDone(step.taskId);
       } else {
         this.options.store.failWorkflowStepRun({
           taskId: step.taskId,
@@ -76,6 +77,7 @@ export class StepExecutor {
         stepId: step.stepId,
         status,
         reportPath,
+        verdict,
         error: result.error,
       };
     } catch (error) {
@@ -111,11 +113,77 @@ export class StepExecutor {
     }
   }
 
+  private claimReadyStep(): WorkflowStepRunRow | null {
+    for (const roleId of claimRoleIdsForAgentRole(this.options.role)) {
+      const step = this.options.store.claimReadyWorkflowStep({
+        roleId,
+        owner: this.options.owner,
+        ttlMinutes: this.options.config.TASK_LEASE_MINUTES,
+      });
+      if (step) return step;
+    }
+    return null;
+  }
+
   private buildStepPrompt(step: WorkflowStepRunRow): string {
     const taskPrompt = this.options.store.getTaskPrompt(step.taskId);
     const dependencies = this.options.store
       .listWorkflowStepRuns(step.taskId)
       .filter((candidate) => parseDependsOn(step.dependsOnJson).includes(candidate.stepId));
+    const dependencySummary = dependencies.length > 0
+      ? dependencies.map((dependency) => `- ${dependency.stepId}: ${dependency.outputRef ?? dependency.status}`).join("\n")
+      : "No dependencies.";
+
+    if (step.action === "plan") {
+      return [
+        "# AgentRunner Planning Step",
+        "",
+        `Task: ${step.taskId}`,
+        `Workflow: ${step.workflowId}`,
+        `Step: ${step.stepId}`,
+        "",
+        "Create a concrete execution plan for this workflow. Focus on what the next role should do, acceptance criteria, risks, and artifacts to produce.",
+        "Do not execute implementation work in this step.",
+        "",
+        "## Original Task Request",
+        taskPrompt,
+        "",
+        "## Dependency Outputs",
+        dependencySummary,
+      ].join("\n");
+    }
+
+    if (step.action === "review" || step.action === "arbitrate") {
+      return [
+        step.action === "review" ? "# AgentRunner Review Step" : "# AgentRunner Arbitration Step",
+        "",
+        `Task: ${step.taskId}`,
+        `Workflow: ${step.workflowId}`,
+        `Step: ${step.stepId}`,
+        `Action: ${step.action}`,
+        "",
+        "You must start with exactly one verdict line:",
+        "VERDICT: APPROVED",
+        "VERDICT: NEEDS_REVISION",
+        "VERDICT: BLOCKED",
+        "VERDICT: NEEDS_HUMAN",
+        "VERDICT: SPLIT_TASK",
+        "VERDICT: RETRY_WITH_DIFFERENT_AGENT",
+        "",
+        "Use APPROVED only when the dependency outputs satisfy the original request.",
+        "Use NEEDS_REVISION when the prior worker can fix concrete issues.",
+        "Use BLOCKED when execution cannot continue safely or lacks critical information.",
+        "Use NEEDS_HUMAN when explicit user approval, credentials, or a human decision is required.",
+        "Use SPLIT_TASK when the request should be decomposed into smaller tasks.",
+        "Use RETRY_WITH_DIFFERENT_AGENT when another role/provider is more appropriate.",
+        "",
+        "## Original Task Request",
+        taskPrompt,
+        "",
+        "## Dependency Outputs",
+        dependencySummary,
+      ].join("\n");
+    }
 
     return [
       "# AgentRunner Workflow Step Execution",
@@ -131,9 +199,7 @@ export class StepExecutor {
       taskPrompt,
       "",
       "## Dependency Outputs",
-      dependencies.length > 0
-        ? dependencies.map((dependency) => `- ${dependency.stepId}: ${dependency.outputRef ?? dependency.status}`).join("\n")
-        : "No dependencies.",
+      dependencySummary,
       "",
       "Execute only this workflow step. Produce a clear step output and mention any artifacts created.",
     ].join("\n");
@@ -165,7 +231,28 @@ export class StepExecutor {
     result: AgentRunResult;
     status: "completed" | "failed";
     reportPath: string;
+    verdict?: ReviewVerdict;
   }): Promise<void> {
+    if (input.verdict) {
+      await this.options.vault.writeNote(
+        input.reportPath,
+        reviewNote({
+          taskId: input.step.taskId,
+          verdict: input.verdict,
+          round: nextReviewRound(this.options.store, input.step.taskId),
+          body: [
+            `# Workflow Step: ${input.step.stepId}`,
+            "",
+            `Action: ${input.step.action}`,
+            `Workflow: ${input.step.workflowId}`,
+            "",
+            input.result.output,
+          ].join("\n"),
+        }),
+      );
+      return;
+    }
+
     await this.options.vault.writeNote(
       input.reportPath,
       botReportNote({
@@ -193,7 +280,7 @@ export class StepExecutor {
     this.options.store.recordArtifact({
       id: `ART-${input.step.taskId}-${this.options.role}-${input.step.stepId}-${Date.now()}`,
       taskId: input.step.taskId,
-      type: "workflow_step_report",
+      type: isReviewAction(input.step.action) ? "workflow_step_review" : "workflow_step_report",
       path: input.reportPath,
       createdBy: this.options.role,
     });
@@ -209,6 +296,37 @@ export class StepExecutor {
     }
   }
 
+  private recordReviewVerdict(input: {
+    step: WorkflowStepRunRow;
+    verdict: ReviewVerdict;
+    output: string;
+    reportPath: string;
+  }): void {
+    const round = nextReviewRound(this.options.store, input.step.taskId);
+    this.options.store.recordReview({
+      id: `REV-${input.step.taskId}-${input.step.stepId}-${round}-${Date.now()}`,
+      taskId: input.step.taskId,
+      verdict: input.verdict,
+      round,
+      feedback: input.output,
+    });
+    this.options.store.recordArtifact({
+      id: `ART-${input.step.taskId}-${input.step.stepId}-review-${Date.now()}`,
+      taskId: input.step.taskId,
+      type: "director_review",
+      path: input.reportPath,
+      createdBy: "director",
+    });
+
+    if (input.verdict === "APPROVED") {
+      this.skipPendingOptionalSteps(input.step.taskId, "Approved by workflow review step.");
+      this.options.store.updateTaskStatus(input.step.taskId, "approved");
+      return;
+    }
+
+    this.options.store.updateTaskStatus(input.step.taskId, statusFromVerdict(input.verdict));
+  }
+
   private completeTaskIfDone(taskId: string): void {
     const steps = this.options.store.listWorkflowStepRuns(taskId);
     const requiredDone = steps
@@ -217,12 +335,41 @@ export class StepExecutor {
     if (requiredDone) this.options.store.updateTaskStatus(taskId, "completed");
     else this.options.store.updateTaskStatus(taskId, "running");
   }
+
+  private skipPendingOptionalSteps(taskId: string, reason: string): void {
+    for (const step of this.options.store.listWorkflowStepRuns(taskId)) {
+      if (!step.required && (step.status === "pending" || step.status === "running")) {
+        this.options.store.updateWorkflowStepRun({
+          taskId,
+          stepId: step.stepId,
+          status: "skipped",
+          error: reason,
+        });
+      }
+    }
+  }
 }
 
 export function claimRoleIdForAgentRole(role: AgentRole): string {
-  if (role === "factory") return "generator";
-  if (role === "director") return "planner";
-  return role;
+  return claimRoleIdsForAgentRole(role)[0] ?? role;
+}
+
+export function claimRoleIdsForAgentRole(role: AgentRole): string[] {
+  if (role === "factory") return ["generator"];
+  if (role === "director") return ["planner", "reviewer", "arbiter"];
+  return [role];
+}
+
+function parseStepReviewVerdict(result: AgentRunResult, output: string): ReviewVerdict {
+  return result.ok ? parseReviewVerdict(output) : "BLOCKED";
+}
+
+function isReviewAction(action: string): boolean {
+  return action === "review" || action === "arbitrate";
+}
+
+function nextReviewRound(store: RuntimeStore, taskId: string): number {
+  return store.listTaskReviews(taskId).length + 1;
 }
 
 function parseDependsOn(value: string): string[] {
