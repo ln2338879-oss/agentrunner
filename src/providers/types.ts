@@ -6,6 +6,8 @@ export type ProviderKind =
   | "claude-code"
   | "codex"
   | "ollama"
+  | "nanobanana"
+  | "gemini-image"
   | "openai"
   | "gemini"
   | "anthropic"
