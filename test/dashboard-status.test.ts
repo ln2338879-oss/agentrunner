@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { RuntimeStore } from "../src/db/runtime-store";
 import { handleDashboardRequest } from "../src/dashboard/server";
+import { createDefaultWorkflowRegistry } from "../src/workflows/engine";
 
 const tempDirs: string[] = [];
 
@@ -30,6 +31,7 @@ describe("dashboard status", () => {
       type: "implementation",
       assignedTo: "builder",
       obsidianPath: "01_Tasks/TASK-DASH-1.md",
+      workflowPlan: createDefaultWorkflowRegistry().plan(undefined, "implementation"),
     });
     store.updateTaskStatus("TASK-DASH-1", "blocked");
 
@@ -41,10 +43,11 @@ describe("dashboard status", () => {
     expect(body.totals.blockedTasks).toBe(1);
     expect(body.byStatus).toContainEqual({ status: "blocked", count: 1 });
     expect(body.byRole).toContainEqual({ role: "builder", status: "blocked", count: 1 });
+    expect(body.workflowStepsByStatus).toContainEqual({ status: "pending", count: 4 });
     expect(body.recentFailures[0].id).toBe("TASK-DASH-1");
   });
 
-  test("returns task details with runs and timeline", async () => {
+  test("returns task details with workflow steps, runs, and timeline", async () => {
     const store = await createTempStore();
     store.createTask({
       id: "TASK-DASH-2",
@@ -52,6 +55,13 @@ describe("dashboard status", () => {
       type: "content",
       assignedTo: "factory",
       obsidianPath: "01_Tasks/TASK-DASH-2.md",
+      workflowPlan: createDefaultWorkflowRegistry().plan(undefined, "content"),
+    });
+    store.updateWorkflowStepRun({
+      taskId: "TASK-DASH-2",
+      stepId: "generate",
+      status: "completed",
+      outputRef: "06_FactoryOutputs/TASK-DASH-2.md",
     });
     store.recordTaskRun({
       id: "RUN-DASH-2",
@@ -84,9 +94,11 @@ describe("dashboard status", () => {
 
     expect(response.status).toBe(200);
     expect(body.task.id).toBe("TASK-DASH-2");
+    expect(body.workflowSteps.map((step: { stepId: string }) => step.stepId)).toEqual(["plan", "generate", "review"]);
     expect(body.runs).toHaveLength(1);
     expect(body.reviews).toHaveLength(1);
     expect(body.artifacts).toHaveLength(1);
+    expect(body.timeline.map((event: { kind: string }) => event.kind)).toContain("workflow_step");
     expect(body.timeline.map((event: { kind: string }) => event.kind)).toContain("run");
     expect(body.timeline.map((event: { kind: string }) => event.kind)).toContain("review");
     expect(body.timeline.map((event: { kind: string }) => event.kind)).toContain("artifact");
@@ -117,6 +129,7 @@ describe("dashboard status", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("AgentRunner Dashboard");
+    expect(html).toContain("Workflow Steps");
     expect(html).toContain("Attention Queue");
     expect(html).toContain("Active Locks");
     expect(html).toContain("/api/status");
