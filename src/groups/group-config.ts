@@ -5,6 +5,8 @@ import { z } from "zod";
 import type { RuntimeConfig } from "../config";
 import { DefaultRuntimePolicy, RuntimePolicySchema, type RuntimePolicy } from "../policies/types";
 
+const RuntimeRoleSchema = z.enum(["director", "builder", "factory", "designer"]);
+
 const WorkspaceProfileSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -29,7 +31,7 @@ const GroupSchema = z.object({
   builderTestCommand: z.string().optional(),
   builderBuildCommand: z.string().optional(),
   defaultWorkflow: z.string().optional(),
-  allowedRoles: z.array(z.enum(["director", "builder", "factory"])).default(["director", "builder", "factory"]),
+  allowedRoles: z.array(RuntimeRoleSchema).default(["director", "builder", "factory", "designer"]),
   skills: z.array(z.string()).default([]),
   policy: RuntimePolicySchema.default(DefaultRuntimePolicy),
 });
