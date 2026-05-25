@@ -2,19 +2,21 @@ import { z } from "zod";
 
 const OptionalWorkerRoleSchema = z.preprocess(
   (value) => value === "" ? undefined : value,
-  z.enum(["director", "builder", "factory"]).optional(),
+  z.enum(["director", "builder", "factory", "designer"]).optional(),
 );
 
 const ConfigSchema = z.object({
   DIRECTOR_DISCORD_TOKEN: z.string().optional().default(""),
   BUILDER_DISCORD_TOKEN: z.string().optional().default(""),
   FACTORY_DISCORD_TOKEN: z.string().optional().default(""),
+  DESIGNER_DISCORD_TOKEN: z.string().optional().default(""),
   DISCORD_CLIENT_ID: z.string().optional().default(""),
   DISCORD_GUILD_ID: z.string().optional().default(""),
   REGISTER_SLASH_COMMANDS: z.coerce.boolean().default(false),
   GAME_DIRECTOR_CHANNEL_ID: z.string().optional().default(""),
   DEV_TASKS_CHANNEL_ID: z.string().optional().default(""),
   CONTENT_FACTORY_CHANNEL_ID: z.string().optional().default(""),
+  DESIGN_TASKS_CHANNEL_ID: z.string().optional().default(""),
   REVIEW_LOG_CHANNEL_ID: z.string().optional().default(""),
   BUILD_LOG_CHANNEL_ID: z.string().optional().default(""),
   DATABASE_PATH: z.string().default("./data/agentrunner.sqlite"),
@@ -25,6 +27,7 @@ const ConfigSchema = z.object({
   WORKFLOWS_CONFIG_PATH: z.string().optional().default("./configs/workflows.yaml"),
   SKILLS_DIR: z.string().optional().default("./skills"),
   ATTACHMENTS_DIR: z.string().optional().default("./data/attachments"),
+  DESIGNER_OUTPUT_DIR: z.string().optional().default("./vault/AgentRunnerVault/06_DesignerOutputs"),
   MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(10_000_000),
   DASHBOARD_ENABLED: z.coerce.boolean().default(false),
   DASHBOARD_HOST: z.string().default("127.0.0.1"),
@@ -43,6 +46,8 @@ const ConfigSchema = z.object({
   OLLAMA_BASE_URLS: z.string().optional().default(""),
   OLLAMA_MODEL: z.string().default("gemma"),
   OLLAMA_MODELS: z.string().optional().default(""),
+  GEMINI_API_KEY: z.string().optional().default(""),
+  GEMINI_IMAGE_MODEL: z.string().optional().default("gemini-3.1-flash-image-preview"),
   AI_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
   MAX_REVIEW_ROUNDS: z.coerce.number().int().positive().default(3),
   TASK_LEASE_MINUTES: z.coerce.number().int().positive().default(30),
