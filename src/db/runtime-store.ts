@@ -6,6 +6,8 @@ import { extendedRuntimeSchemaSql } from "./extended-schema";
 import type { AgentRole, ReviewVerdict, RuntimeTask, TaskStatus, TaskType } from "../runtime/types";
 import type { WorkflowPlan } from "../workflows/types";
 
+export type WorkflowStepRunStatus = "pending" | "running" | "completed" | "skipped" | "failed";
+
 export interface TaskSummaryRow {
   id: string;
   title: string;
@@ -48,8 +50,29 @@ export interface TaskRunRow {
   finishedAt: string | null;
 }
 
+export interface WorkflowStepRunRow {
+  id: string;
+  taskId: string;
+  workflowId: string;
+  stepId: string;
+  stepIndex: number;
+  role: string;
+  resolvedRoleId: string;
+  action: string;
+  status: WorkflowStepRunStatus;
+  dependsOnJson: string;
+  required: number;
+  requiresReview: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  outputRef: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TaskTimelineEvent {
-  kind: "task" | "run" | "review" | "artifact";
+  kind: "task" | "workflow_step" | "run" | "review" | "artifact";
   label: string;
   status?: string;
   role?: string;
@@ -67,6 +90,7 @@ export interface DashboardStatus {
   };
   byStatus: Array<{ status: string; count: number }>;
   byRole: Array<{ role: string; status: string; count: number }>;
+  workflowStepsByStatus: Array<{ status: string; count: number }>;
   recentFailures: Array<{ id: string; title: string; status: string; assignedTo: string; updatedAt: string }>;
   activeLocks: Array<{ id: string; title: string; assignedTo: string; lockedBy: string | null; lockExpiresAt: string | null }>;
 }
@@ -142,6 +166,10 @@ export class RuntimeStore {
       $now: now,
     });
 
+    if (input.workflowPlan) {
+      this.initializeWorkflowStepRuns({ taskId: input.id, workflowPlan: input.workflowPlan });
+    }
+
     return {
       id: input.id,
       title: input.title,
@@ -153,6 +181,116 @@ export class RuntimeStore {
       createdAt: now,
       updatedAt: now,
     };
+  }
+
+  initializeWorkflowStepRuns(input: { taskId: string; workflowPlan: WorkflowPlan }): void {
+    const now = new Date().toISOString();
+    const insert = this.db.query(`
+      INSERT OR IGNORE INTO workflow_step_runs (
+        id,
+        task_id,
+        workflow_id,
+        step_id,
+        step_index,
+        role,
+        resolved_role_id,
+        action,
+        status,
+        depends_on_json,
+        required,
+        requires_review,
+        created_at,
+        updated_at
+      ) VALUES (
+        $id,
+        $taskId,
+        $workflowId,
+        $stepId,
+        $stepIndex,
+        $role,
+        $resolvedRoleId,
+        $action,
+        'pending',
+        $dependsOnJson,
+        $required,
+        $requiresReview,
+        $now,
+        $now
+      )
+    `);
+
+    input.workflowPlan.steps.forEach((step, index) => {
+      insert.run({
+        $id: `WSTEP-${input.taskId}-${step.id}`,
+        $taskId: input.taskId,
+        $workflowId: input.workflowPlan.workflowId,
+        $stepId: step.id,
+        $stepIndex: index,
+        $role: step.role,
+        $resolvedRoleId: step.resolvedRoleId,
+        $action: step.action,
+        $dependsOnJson: JSON.stringify(step.dependsOn),
+        $required: step.required ? 1 : 0,
+        $requiresReview: step.requiresReview ? 1 : 0,
+        $now: now,
+      });
+    });
+  }
+
+  updateWorkflowStepRun(input: {
+    taskId: string;
+    stepId: string;
+    status: WorkflowStepRunStatus;
+    outputRef?: string;
+    error?: string;
+    now?: string;
+  }): void {
+    const now = input.now ?? new Date().toISOString();
+    this.db.query(`
+      UPDATE workflow_step_runs
+      SET
+        status = $status,
+        started_at = CASE WHEN $status = 'running' THEN COALESCE(started_at, $now) ELSE started_at END,
+        finished_at = CASE WHEN $status IN ('completed', 'skipped', 'failed') THEN $now ELSE finished_at END,
+        output_ref = COALESCE($outputRef, output_ref),
+        error = COALESCE($error, error),
+        updated_at = $now
+      WHERE task_id = $taskId AND step_id = $stepId
+    `).run({
+      $taskId: input.taskId,
+      $stepId: input.stepId,
+      $status: input.status,
+      $outputRef: input.outputRef ?? null,
+      $error: input.error ?? null,
+      $now: now,
+    });
+  }
+
+  listWorkflowStepRuns(taskId: string): WorkflowStepRunRow[] {
+    return this.db.query(`
+      SELECT
+        id,
+        task_id as taskId,
+        workflow_id as workflowId,
+        step_id as stepId,
+        step_index as stepIndex,
+        role,
+        resolved_role_id as resolvedRoleId,
+        action,
+        status,
+        depends_on_json as dependsOnJson,
+        required,
+        requires_review as requiresReview,
+        started_at as startedAt,
+        finished_at as finishedAt,
+        output_ref as outputRef,
+        error,
+        created_at as createdAt,
+        updated_at as updatedAt
+      FROM workflow_step_runs
+      WHERE task_id = $taskId
+      ORDER BY step_index ASC
+    `).all({ $taskId: taskId }) as WorkflowStepRunRow[];
   }
 
   updateTaskStatus(id: string, status: TaskStatus): void {
@@ -227,6 +365,13 @@ export class RuntimeStore {
       ORDER BY assigned_to ASC, status ASC
     `).all() as Array<{ role: string; status: string; count: number }>;
 
+    const workflowStepsByStatus = this.db.query(`
+      SELECT status, COUNT(*) as count
+      FROM workflow_step_runs
+      GROUP BY status
+      ORDER BY count DESC, status ASC
+    `).all() as Array<{ status: string; count: number }>;
+
     const totalsRow = this.db.query(`
       SELECT
         COUNT(*) as tasks,
@@ -262,6 +407,7 @@ export class RuntimeStore {
       },
       byStatus,
       byRole,
+      workflowStepsByStatus,
       recentFailures,
       activeLocks,
     };
@@ -472,6 +618,14 @@ export class RuntimeStore {
         path: task.obsidianPath,
         createdAt: task.createdAt,
       },
+      ...this.listWorkflowStepRuns(taskId).map((step): TaskTimelineEvent => ({
+        kind: "workflow_step",
+        label: `Workflow step ${step.stepIndex + 1}: ${step.stepId}`,
+        status: step.status,
+        role: step.role,
+        path: step.outputRef ?? undefined,
+        createdAt: step.startedAt ?? step.updatedAt,
+      })),
       ...this.listTaskRuns(taskId).map((run): TaskTimelineEvent => ({
         kind: "run",
         label: `Run ${run.id}`,

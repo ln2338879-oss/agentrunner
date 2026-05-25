@@ -1,5 +1,5 @@
 import type { RuntimeConfig } from "../config";
-import type { RuntimeStore, TaskSummaryRow } from "../db/runtime-store";
+import type { RuntimeStore } from "../db/runtime-store";
 
 export function startDashboardServer(input: {
   config: RuntimeConfig;
@@ -46,6 +46,7 @@ export function handleDashboardRequest(request: Request, store: RuntimeStore): R
     return json({
       task,
       workflowPlan: parseWorkflowPlan(task.workflowPlanJson),
+      workflowSteps: store.listWorkflowStepRuns(taskId),
       runs: store.listTaskRuns(taskId),
       artifacts: store.listTaskArtifacts(taskId),
       reviews: store.listTaskReviews(taskId),
@@ -98,6 +99,10 @@ function renderDashboardHtml(store: RuntimeStore): string {
     .map((item) => `<tr><td>${escapeHtml(item.role)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(String(item.count))}</td></tr>`)
     .join("\n");
 
+  const workflowStepRows = status.workflowStepsByStatus
+    .map((item) => `<tr><td>${escapeHtml(item.status)}</td><td>${escapeHtml(String(item.count))}</td></tr>`)
+    .join("\n");
+
   const failureRows = status.recentFailures
     .map((task) => `<tr><td><a href="/api/tasks/${encodeURIComponent(task.id)}">${escapeHtml(task.id)}</a></td><td>${escapeHtml(task.status)}</td><td>${escapeHtml(task.assignedTo)}</td><td>${escapeHtml(task.updatedAt)}</td></tr>`)
     .join("\n");
@@ -144,6 +149,10 @@ function renderDashboardHtml(store: RuntimeStore): string {
     <section>
       <h2>Role Load</h2>
       <table><thead><tr><th>Role</th><th>Status</th><th>Count</th></tr></thead><tbody>${byRoleRows || "<tr><td colspan=\"3\">No tasks yet.</td></tr>"}</tbody></table>
+    </section>
+    <section>
+      <h2>Workflow Steps</h2>
+      <table><thead><tr><th>Step Status</th><th>Count</th></tr></thead><tbody>${workflowStepRows || "<tr><td colspan=\"2\">No workflow steps yet.</td></tr>"}</tbody></table>
     </section>
   </div>
 
