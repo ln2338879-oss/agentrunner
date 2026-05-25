@@ -73,6 +73,34 @@ docs/proof/runtime-proof.md
 
 Local proof runtime files are written to `.agentrunner-proof/`, which is ignored by Git.
 
+## GitHub Actions Runtime Proof
+
+The repository includes a separate workflow:
+
+```text
+.github/workflows/runtime-proof.yml
+```
+
+It runs `bun run proof` separately from the main quality gate. This keeps the standard typecheck/lint/test/build job fast and makes runtime validation easier to inspect.
+
+The workflow runs on:
+
+```text
+main branch pushes
+manual workflow_dispatch runs
+pull requests that change src, test, scripts, package files, tsconfig, or workflows
+```
+
+Documentation-only pull requests do not trigger the runtime proof workflow.
+
+The generated `docs/proof/runtime-proof.md` is uploaded as a GitHub Actions artifact named:
+
+```text
+agentrunner-runtime-proof
+```
+
+Artifact retention is set to 7 days.
+
 ## Production Validation
 
 After local proof passes, configure real values in `.env`:
