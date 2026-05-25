@@ -28,4 +28,26 @@ CREATE TABLE IF NOT EXISTS steering_messages (
   consumed_at TEXT,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS workflow_step_runs (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  workflow_id TEXT NOT NULL,
+  step_id TEXT NOT NULL,
+  step_index INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  resolved_role_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  status TEXT NOT NULL,
+  depends_on_json TEXT NOT NULL,
+  required INTEGER NOT NULL,
+  requires_review INTEGER NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  output_ref TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(task_id, step_id)
+);
 `;
