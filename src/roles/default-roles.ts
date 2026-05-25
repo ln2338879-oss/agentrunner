@@ -6,7 +6,7 @@ export const DefaultRoleDefinitions: RoleDefinition[] = [
     label: "Planner",
     legacyRole: "director",
     provider: "claude-code",
-    command: "claude",
+    fallbackCommands: [],
     capabilities: ["plan", "review"],
     permissions: {
       canWriteFiles: false,
@@ -23,7 +23,7 @@ export const DefaultRoleDefinitions: RoleDefinition[] = [
     label: "Builder",
     legacyRole: "builder",
     provider: "codex",
-    command: "codex",
+    fallbackCommands: [],
     capabilities: ["implement", "run-tests", "write-files"],
     permissions: {
       canWriteFiles: true,
@@ -41,6 +41,7 @@ export const DefaultRoleDefinitions: RoleDefinition[] = [
     legacyRole: "factory",
     provider: "ollama",
     model: "gemma",
+    fallbackCommands: [],
     capabilities: ["generate-content"],
     permissions: {
       canWriteFiles: false,
@@ -57,7 +58,7 @@ export const DefaultRoleDefinitions: RoleDefinition[] = [
     label: "Reviewer",
     legacyRole: "director",
     provider: "claude-code",
-    command: "claude",
+    fallbackCommands: [],
     capabilities: ["review"],
     permissions: {
       canWriteFiles: false,
@@ -74,7 +75,7 @@ export const DefaultRoleDefinitions: RoleDefinition[] = [
     label: "Arbiter",
     legacyRole: "director",
     provider: "claude-code",
-    command: "claude",
+    fallbackCommands: [],
     capabilities: ["arbitrate", "review"],
     permissions: {
       canWriteFiles: false,
