@@ -507,7 +507,7 @@ export class RuntimeStore {
     return {
       id,
       discordChannelId: input.discordChannelId,
-      title,
+      title: input.title,
       status: "open",
       groupId: input.groupId ?? null,
       createdAt: now,
@@ -562,9 +562,9 @@ export class RuntimeStore {
         SET consumed_at = $consumedAt
         WHERE task_id = $taskId AND consumed_at IS NULL
       `).run({
-      $taskId: taskId,
-      $consumedAt: new Date().toISOString(),
-    });
+        $taskId: taskId,
+        $consumedAt: new Date().toISOString(),
+      });
     }
 
     return rows;
