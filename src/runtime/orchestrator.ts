@@ -6,6 +6,7 @@ import { NullNotifier } from "../discord/notifier";
 import type { GroupConfigManager } from "../groups/group-config";
 import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
+import { createPolicyEngine, type PolicyEngine } from "../policies/engine";
 import { runDirectorReview, statusFromVerdict } from "../review/review-loop";
 import { RoleRegistry } from "../roles/registry";
 import { classifyTask } from "../router/classify";
@@ -91,6 +92,7 @@ export class Orchestrator {
     verdict?: ReviewVerdict;
   }> {
     const group = this.groupConfig?.resolveByChannel(input.discordChannelId) ?? null;
+    const policyEngine = createPolicyEngine(group?.effectivePolicy);
     const skillContext = await loadSkillContext({
       skillsDir: this.config.SKILLS_DIR,
       skillIds: group?.effectiveSkills ?? [],
@@ -122,12 +124,12 @@ export class Orchestrator {
       throw new Error(`Role ${classified.assignedTo} is not allowed in group ${group.id}.`);
     }
 
-    if (group && classified.assignedTo === "builder" && !group.effectivePolicy.allowCodeChanges) {
-      throw new Error(`Code changes are disabled in group ${group.id}.`);
+    if (classified.assignedTo === "builder") {
+      policyEngine.requireAllowed("code_changes");
     }
 
-    if (group && classified.assignedTo === "factory" && !group.effectivePolicy.allowContentGeneration) {
-      throw new Error(`Content generation is disabled in group ${group.id}.`);
+    if (classified.assignedTo === "factory") {
+      policyEngine.requireAllowed("content_generation");
     }
 
     this.store.createTask({
@@ -253,7 +255,12 @@ export class Orchestrator {
             reviewPath: latestReviewPath,
             output: result.result.output,
           });
-          await this.runApprovedTaskCommand({ taskId, reportPath: latestReportPath, reviewPath: latestReviewPath });
+          await this.runApprovedTaskCommand({
+            taskId,
+            reportPath: latestReportPath,
+            reviewPath: latestReviewPath,
+            policyEngine,
+          });
           await this.notifier.approved({
             taskId,
             approvedPath,
@@ -416,8 +423,41 @@ export class Orchestrator {
     return approvedPath;
   }
 
-  private async runApprovedTaskCommand(input: { taskId: string; reportPath: string; reviewPath: string }): Promise<void> {
+  private async runApprovedTaskCommand(input: {
+    taskId: string;
+    reportPath: string;
+    reviewPath: string;
+    policyEngine: PolicyEngine;
+  }): Promise<void> {
     if (!this.config.APPROVED_TASK_COMMAND) return;
+    const decision = input.policyEngine.decide("approved_task_command");
+    if (decision.status !== "allowed") {
+      const path = `07_Approved/${input.taskId}-approved-command-policy.md`;
+      await this.vault.writeNote(
+        path,
+        [
+          "---",
+          `task_id: ${input.taskId}`,
+          `action: ${decision.action}`,
+          `policy_status: ${decision.status}`,
+          `created_at: ${new Date().toISOString()}`,
+          "---",
+          "",
+          "# Approved Task Command Policy Decision",
+          "",
+          decision.reason,
+        ].join("\n"),
+      );
+      this.store.recordArtifact({
+        id: `ART-${input.taskId}-approved-command-policy-${Date.now()}`,
+        taskId: input.taskId,
+        type: "policy_decision",
+        path,
+        createdBy: "director",
+      });
+      return;
+    }
+
     const commandInput = [
       `TASK_ID=${input.taskId}`,
       `REPORT_PATH=${input.reportPath}`,

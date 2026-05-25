@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "../src/config";
 import { applyGroupOverrides, GroupConfigManager } from "../src/groups/group-config";
+import { DefaultRuntimePolicy } from "../src/policies/types";
 
 const tempDirs: string[] = [];
 
@@ -66,6 +67,8 @@ profiles:
       allowCodeChanges: true
       allowContentGeneration: false
       requireDirectorReview: true
+      requireHumanApprovalFor:
+        - approved_task_command
 
 groups:
   - id: agentrunner-core
@@ -85,6 +88,8 @@ groups:
       - repo-style
     policy:
       allowContentGeneration: true
+      requireHumanApprovalFor:
+        - systemd_restart
 `);
 
     const manager = new GroupConfigManager(loadConfig({ GROUPS_CONFIG_PATH: groupsPath }));
@@ -99,6 +104,7 @@ groups:
     expect(group?.effectiveSkills).toEqual(["code-style", "testing", "repo-style"]);
     expect(group?.effectivePolicy.allowCodeChanges).toBe(true);
     expect(group?.effectivePolicy.allowContentGeneration).toBe(true);
+    expect(group?.effectivePolicy.requireHumanApprovalFor).toEqual(["approved_task_command", "systemd_restart"]);
     expect(manager.listProfiles().map((profile) => profile.id)).toEqual(["software-dev"]);
   });
 
@@ -134,17 +140,9 @@ describe("applyGroupOverrides", () => {
       builderBuildCommand: "npm run build",
       allowedRoles: ["director", "builder", "factory"],
       skills: [],
-      policy: {
-        allowCodeChanges: true,
-        allowContentGeneration: true,
-        requireDirectorReview: true,
-      },
+      policy: DefaultRuntimePolicy,
       effectiveSkills: [],
-      effectivePolicy: {
-        allowCodeChanges: true,
-        allowContentGeneration: true,
-        requireDirectorReview: true,
-      },
+      effectivePolicy: DefaultRuntimePolicy,
     });
 
     expect(overridden.PROJECT_ROOT).toBe("/game/project");
@@ -167,15 +165,13 @@ describe("applyGroupOverrides", () => {
       allowedRoles: ["director"],
       skills: [],
       policy: {
+        ...DefaultRuntimePolicy,
         allowCodeChanges: false,
-        allowContentGeneration: true,
-        requireDirectorReview: true,
       },
       effectiveSkills: [],
       effectivePolicy: {
+        ...DefaultRuntimePolicy,
         allowCodeChanges: false,
-        allowContentGeneration: true,
-        requireDirectorReview: true,
       },
     });
 

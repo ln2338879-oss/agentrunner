@@ -1,0 +1,44 @@
+import { describe, expect, test } from "bun:test";
+import { createPolicyEngine, PolicyDeniedError } from "../src/policies/engine";
+
+describe("PolicyEngine", () => {
+  test("allows current runtime-compatible defaults", () => {
+    const policy = createPolicyEngine();
+
+    expect(policy.decide("code_changes").status).toBe("allowed");
+    expect(policy.decide("content_generation").status).toBe("allowed");
+    expect(policy.decide("write_files").status).toBe("allowed");
+    expect(policy.decide("run_shell_command").status).toBe("allowed");
+    expect(policy.decide("approved_task_command").status).toBe("allowed");
+  });
+
+  test("denies disabled actions", () => {
+    const policy = createPolicyEngine({
+      allowCodeChanges: false,
+      allowShellCommands: false,
+      allowApprovedTaskCommand: true,
+    });
+
+    expect(policy.decide("code_changes")).toEqual({
+      status: "denied",
+      action: "code_changes",
+      reason: "Action code_changes is denied by policy.",
+    });
+    expect(policy.decide("approved_task_command").status).toBe("denied");
+  });
+
+  test("marks explicitly gated actions as requiring human approval", () => {
+    const policy = createPolicyEngine({
+      requireHumanApprovalFor: ["approved_task_command", "systemd_restart"],
+    });
+
+    expect(policy.decide("approved_task_command").status).toBe("needs_human");
+    expect(policy.decide("systemd_restart").status).toBe("needs_human");
+  });
+
+  test("throws PolicyDeniedError from requireAllowed", () => {
+    const policy = createPolicyEngine({ allowContentGeneration: false });
+
+    expect(() => policy.requireAllowed("content_generation")).toThrow(PolicyDeniedError);
+  });
+});
