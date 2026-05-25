@@ -21,6 +21,7 @@ const ConfigSchema = z.object({
   OBSIDIAN_VAULT_PATH: z.string().default("./vault/AgentRunnerVault"),
   PROJECT_ROOT: z.string().default("./game-project"),
   GROUPS_CONFIG_PATH: z.string().optional().default("./configs/groups.yaml"),
+  ROLES_CONFIG_PATH: z.string().optional().default("./configs/roles.yaml"),
   SKILLS_DIR: z.string().optional().default("./skills"),
   ATTACHMENTS_DIR: z.string().optional().default("./data/attachments"),
   MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(10_000_000),

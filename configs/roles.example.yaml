@@ -1,0 +1,71 @@
+# Generic role registry example.
+# The legacy director/builder/factory aliases remain supported.
+
+aliases:
+  director: planner
+  builder: builder
+  factory: generator
+  worker: builder
+  reviewer: reviewer
+  arbiter: arbiter
+
+roles:
+  - id: planner
+    label: Planner
+    legacyRole: director
+    provider: claude-code
+    command: claude
+    capabilities:
+      - plan
+      - review
+    permissions:
+      canCreateTasks: true
+      canReview: true
+      requiresReview: false
+
+  - id: builder
+    label: Builder
+    legacyRole: builder
+    provider: codex
+    command: codex
+    capabilities:
+      - implement
+      - run-tests
+      - write-files
+    permissions:
+      canWriteFiles: true
+      canRunCommands: true
+      canRunTests: true
+      requiresReview: true
+
+  - id: generator
+    label: Generator
+    legacyRole: factory
+    provider: ollama
+    model: gemma
+    capabilities:
+      - generate-content
+    permissions:
+      requiresReview: true
+
+  - id: researcher
+    label: Researcher
+    provider: openai
+    model: gpt-4.1-mini
+    capabilities:
+      - research
+    permissions:
+      requiresReview: true
+
+  - id: arbiter
+    label: Arbiter
+    provider: claude-code
+    command: claude
+    capabilities:
+      - arbitrate
+      - review
+    permissions:
+      canArbitrate: true
+      canCreateTasks: true
+      canReview: true
+      requiresReview: false
