@@ -6,4 +6,5 @@ dist/
 data/*.sqlite
 data/*.sqlite-*
 .agentrunner-proof/
+setup-report.md
 .DS_Store
