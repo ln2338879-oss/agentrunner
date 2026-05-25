@@ -1,7 +1,7 @@
 import { existsSync, accessSync, constants } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { loadConfig, type RuntimeConfig } from "./config";
+import { loadConfig } from "./config";
 import { runShellCommand } from "./utils/command";
 
 export interface CheckResult {
