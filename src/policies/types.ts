@@ -12,20 +12,6 @@ export const PolicyActionSchema = z.enum([
   "network_access",
 ]);
 
-export const DefaultRuntimePolicy = {
-  allowCodeChanges: true,
-  allowContentGeneration: true,
-  requireDirectorReview: true,
-  allowFileWrites: true,
-  allowShellCommands: true,
-  allowTests: true,
-  allowBuilds: true,
-  allowApprovedTaskCommand: true,
-  allowSystemdRestart: false,
-  allowNetworkAccess: false,
-  requireHumanApprovalFor: [] as string[],
-};
-
 export const RuntimePolicySchema = z.object({
   allowCodeChanges: z.boolean().default(true),
   allowContentGeneration: z.boolean().default(true),
@@ -43,6 +29,20 @@ export const RuntimePolicySchema = z.object({
 export type PolicyAction = z.infer<typeof PolicyActionSchema>;
 export type RuntimePolicy = z.infer<typeof RuntimePolicySchema>;
 export type PolicyDecisionStatus = "allowed" | "denied" | "needs_human";
+
+export const DefaultRuntimePolicy: RuntimePolicy = {
+  allowCodeChanges: true,
+  allowContentGeneration: true,
+  requireDirectorReview: true,
+  allowFileWrites: true,
+  allowShellCommands: true,
+  allowTests: true,
+  allowBuilds: true,
+  allowApprovedTaskCommand: true,
+  allowSystemdRestart: false,
+  allowNetworkAccess: false,
+  requireHumanApprovalFor: [],
+};
 
 export interface PolicyDecision {
   status: PolicyDecisionStatus;
