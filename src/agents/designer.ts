@@ -108,13 +108,19 @@ export function extractReferenceImages(prompt: string): ReferenceImage[] {
     if (!line.startsWith("local_path:")) continue;
 
     const localPath = line.replace(/^local_path:\s*/, "").trim();
-    const mimeType = currentContentType && currentContentType.startsWith("image/")
+    const hasExplicitContentType = Boolean(currentContentType && currentContentType !== "unknown");
+    const mimeType = currentContentType?.startsWith("image/")
       ? currentContentType
-      : mimeTypeFromPath(localPath);
+      : hasExplicitContentType
+        ? currentContentType ?? "application/octet-stream"
+        : mimeTypeFromPath(localPath);
 
     if (currentKind === "image" || mimeType.startsWith("image/")) {
       references.push({ localPath, mimeType });
     }
+
+    currentContentType = undefined;
+    currentKind = undefined;
   }
 
   return dedupeReferenceImages(references);
