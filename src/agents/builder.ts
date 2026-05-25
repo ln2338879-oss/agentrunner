@@ -10,7 +10,8 @@ export class BuilderAgent implements AgentAdapter {
   constructor(private readonly config: RuntimeConfig) {}
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
-    const workspacePath = input.workspacePath ?? this.config.PROJECT_ROOT;
+    const config = input.runtimeConfig ?? this.config;
+    const workspacePath = input.workspacePath ?? config.PROJECT_ROOT;
     const prompt = buildCliPrompt({
       role: "Builder",
       taskId: input.taskId,
@@ -19,14 +20,14 @@ export class BuilderAgent implements AgentAdapter {
     });
 
     const codexResult = await runCommandWithFailover({
-      commands: parseCommandCandidates(this.config.CODEX_COMMAND, this.config.CODEX_COMMANDS),
+      commands: parseCommandCandidates(config.CODEX_COMMAND, config.CODEX_COMMANDS),
       cwd: workspacePath,
       prompt,
-      timeoutMs: this.config.AI_COMMAND_TIMEOUT_MS,
-      enabled: this.config.ENABLE_AGENT_FAILOVER,
+      timeoutMs: config.AI_COMMAND_TIMEOUT_MS,
+      enabled: config.ENABLE_AGENT_FAILOVER,
     });
 
-    const validation = await this.runValidation(workspacePath);
+    const validation = await this.runValidation(workspacePath, config);
     const output = [
       "# Builder Result",
       "",
@@ -44,19 +45,19 @@ export class BuilderAgent implements AgentAdapter {
     };
   }
 
-  private async runValidation(workspacePath: string): Promise<string> {
+  private async runValidation(workspacePath: string, config: RuntimeConfig): Promise<string> {
     const sections: string[] = ["## Builder Validation"];
 
-    if (this.config.BUILDER_DIFF_COMMAND) {
-      sections.push(await runOptionalStep("Diff", this.config.BUILDER_DIFF_COMMAND, workspacePath));
+    if (config.BUILDER_DIFF_COMMAND) {
+      sections.push(await runOptionalStep("Diff", config.BUILDER_DIFF_COMMAND, workspacePath));
     }
 
-    if (this.config.BUILDER_TEST_COMMAND) {
-      sections.push(await runOptionalStep("Test", this.config.BUILDER_TEST_COMMAND, workspacePath));
+    if (config.BUILDER_TEST_COMMAND) {
+      sections.push(await runOptionalStep("Test", config.BUILDER_TEST_COMMAND, workspacePath));
     }
 
-    if (this.config.BUILDER_BUILD_COMMAND) {
-      sections.push(await runOptionalStep("Build", this.config.BUILDER_BUILD_COMMAND, workspacePath));
+    if (config.BUILDER_BUILD_COMMAND) {
+      sections.push(await runOptionalStep("Build", config.BUILDER_BUILD_COMMAND, workspacePath));
     }
 
     return sections.join("\n\n");
