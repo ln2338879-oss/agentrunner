@@ -37,6 +37,40 @@ export interface ReviewRow {
   createdAt: string;
 }
 
+export interface TaskRunRow {
+  id: string;
+  taskId: string;
+  role: string;
+  model: string | null;
+  status: string;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface TaskTimelineEvent {
+  kind: "task" | "run" | "review" | "artifact";
+  label: string;
+  status?: string;
+  role?: string;
+  path?: string;
+  createdAt: string;
+}
+
+export interface DashboardStatus {
+  generatedAt: string;
+  totals: {
+    tasks: number;
+    openTasks: number;
+    blockedTasks: number;
+    approvedTasks: number;
+  };
+  byStatus: Array<{ status: string; count: number }>;
+  byRole: Array<{ role: string; status: string; count: number }>;
+  recentFailures: Array<{ id: string; title: string; status: string; assignedTo: string; updatedAt: string }>;
+  activeLocks: Array<{ id: string; title: string; assignedTo: string; lockedBy: string | null; lockExpiresAt: string | null }>;
+}
+
 export interface SessionRow {
   id: string;
   discordChannelId: string;
@@ -176,6 +210,61 @@ export class RuntimeStore {
       ORDER BY created_at DESC
       LIMIT $limit
     `).all({ $limit: limit }) as TaskSummaryRow[];
+  }
+
+  getDashboardStatus(): DashboardStatus {
+    const byStatus = this.db.query(`
+      SELECT status, COUNT(*) as count
+      FROM tasks
+      GROUP BY status
+      ORDER BY count DESC, status ASC
+    `).all() as Array<{ status: string; count: number }>;
+
+    const byRole = this.db.query(`
+      SELECT assigned_to as role, status, COUNT(*) as count
+      FROM tasks
+      GROUP BY assigned_to, status
+      ORDER BY assigned_to ASC, status ASC
+    `).all() as Array<{ role: string; status: string; count: number }>;
+
+    const totalsRow = this.db.query(`
+      SELECT
+        COUNT(*) as tasks,
+        SUM(CASE WHEN status IN ('pending', 'running', 'needs_revision', 'needs_human', 'split_task', 'retry_with_different_agent') THEN 1 ELSE 0 END) as openTasks,
+        SUM(CASE WHEN status IN ('blocked', 'failed') THEN 1 ELSE 0 END) as blockedTasks,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approvedTasks
+      FROM tasks
+    `).get() as { tasks: number; openTasks: number | null; blockedTasks: number | null; approvedTasks: number | null };
+
+    const recentFailures = this.db.query(`
+      SELECT id, title, status, assigned_to as assignedTo, updated_at as updatedAt
+      FROM tasks
+      WHERE status IN ('blocked', 'failed', 'needs_human', 'split_task', 'retry_with_different_agent')
+      ORDER BY updated_at DESC
+      LIMIT 10
+    `).all() as Array<{ id: string; title: string; status: string; assignedTo: string; updatedAt: string }>;
+
+    const activeLocks = this.db.query(`
+      SELECT id, title, assigned_to as assignedTo, locked_by as lockedBy, lock_expires_at as lockExpiresAt
+      FROM tasks
+      WHERE locked_by IS NOT NULL
+      ORDER BY lock_expires_at ASC
+      LIMIT 10
+    `).all() as Array<{ id: string; title: string; assignedTo: string; lockedBy: string | null; lockExpiresAt: string | null }>;
+
+    return {
+      generatedAt: new Date().toISOString(),
+      totals: {
+        tasks: totalsRow.tasks,
+        openTasks: totalsRow.openTasks ?? 0,
+        blockedTasks: totalsRow.blockedTasks ?? 0,
+        approvedTasks: totalsRow.approvedTasks ?? 0,
+      },
+      byStatus,
+      byRole,
+      recentFailures,
+      activeLocks,
+    };
   }
 
   claimPendingTask(input: {
@@ -351,6 +440,62 @@ export class RuntimeStore {
       WHERE task_id = $taskId
       ORDER BY round ASC, created_at ASC
     `).all({ $taskId: taskId }) as ReviewRow[];
+  }
+
+  listTaskRuns(taskId: string): TaskRunRow[] {
+    return this.db.query(`
+      SELECT
+        id,
+        task_id as taskId,
+        role,
+        model,
+        status,
+        error,
+        started_at as startedAt,
+        finished_at as finishedAt
+      FROM task_runs
+      WHERE task_id = $taskId
+      ORDER BY started_at ASC
+    `).all({ $taskId: taskId }) as TaskRunRow[];
+  }
+
+  getTaskTimeline(taskId: string): TaskTimelineEvent[] {
+    const task = this.getTask(taskId);
+    if (!task) return [];
+
+    const events: TaskTimelineEvent[] = [
+      {
+        kind: "task",
+        label: `Task created: ${task.title}`,
+        status: task.status,
+        role: task.assignedTo,
+        path: task.obsidianPath,
+        createdAt: task.createdAt,
+      },
+      ...this.listTaskRuns(taskId).map((run): TaskTimelineEvent => ({
+        kind: "run",
+        label: `Run ${run.id}`,
+        status: run.status,
+        role: run.role,
+        createdAt: run.startedAt,
+      })),
+      ...this.listTaskReviews(taskId).map((review): TaskTimelineEvent => ({
+        kind: "review",
+        label: `Review round ${review.round}: ${review.verdict}`,
+        status: review.verdict,
+        role: "director",
+        createdAt: review.createdAt,
+      })),
+      ...this.listTaskArtifacts(taskId).map((artifact): TaskTimelineEvent => ({
+        kind: "artifact",
+        label: artifact.type,
+        role: artifact.createdBy,
+        path: artifact.path,
+        createdAt: artifact.createdAt,
+      })),
+    ];
+
+    return events.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
   acquireTaskLease(input: { taskId: string; owner: string; ttlMinutes: number }): boolean {
