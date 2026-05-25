@@ -1,9 +1,15 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "../src/config";
-import { buildDesignerPrompt, DesignerAgent, saveGeminiImageResponse } from "../src/agents/designer";
+import {
+  buildDesignerPrompt,
+  buildGeminiDesignerContents,
+  DesignerAgent,
+  extractReferenceImages,
+  saveGeminiImageResponse,
+} from "../src/agents/designer";
 
 const tempDirs: string[] = [];
 
@@ -24,6 +30,53 @@ describe("DesignerAgent", () => {
     expect(prompt).toContain("Designer agent");
     expect(prompt).toContain("User design request:");
     expect(prompt).toContain("Create a fantasy item icon.");
+  });
+
+  test("extracts image reference attachments from Discord attachment context", () => {
+    const prompt = [
+      "픽셀아트로 바꿔줘",
+      "",
+      "# Discord Attachments",
+      "",
+      "- filename: hero.png",
+      "  url: https://cdn.example/hero.png",
+      "  content_type: image/png",
+      "  size_bytes: 123",
+      "  kind: image",
+      "  local_path: /tmp/hero.png",
+      "- filename: notes.txt",
+      "  url: https://cdn.example/notes.txt",
+      "  content_type: text/plain",
+      "  size_bytes: 20",
+      "  kind: file",
+      "  local_path: /tmp/notes.txt",
+      "- filename: hero-copy.png",
+      "  url: https://cdn.example/hero-copy.png",
+      "  content_type: image/png",
+      "  size_bytes: 123",
+      "  kind: image",
+      "  local_path: /tmp/hero.png",
+    ].join("\n");
+
+    expect(extractReferenceImages(prompt)).toEqual([
+      { localPath: "/tmp/hero.png", mimeType: "image/png" },
+    ]);
+  });
+
+  test("builds Gemini contents with inline reference image data", async () => {
+    const outputDir = await createTempDir();
+    const imagePath = path.join(outputDir, "reference.webp");
+    await writeFile(imagePath, "reference-image-data", "utf-8");
+
+    const contents = await buildGeminiDesignerContents({
+      prompt: "Use this image as a reference.",
+      referenceImages: [{ localPath: imagePath, mimeType: "image/webp" }],
+    });
+
+    expect(contents).toHaveLength(2);
+    expect(contents[0]?.inlineData?.mimeType).toBe("image/webp");
+    expect(contents[0]?.inlineData?.data).toBe(Buffer.from("reference-image-data").toString("base64"));
+    expect(contents[1]?.text).toContain("Use this image as a reference.");
   });
 
   test("fails clearly when Gemini API key is missing", async () => {
