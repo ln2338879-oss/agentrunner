@@ -15,6 +15,7 @@ import { loadSkillContext } from "../skills/context";
 import { runShellCommand } from "../utils/command";
 import { appendVisionAnalysis } from "../vision/adapter";
 import { WorkflowRegistry } from "../workflows/engine";
+import type { PlannedWorkflowStep, WorkflowPlan } from "../workflows/types";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./types";
 
 export class Orchestrator {
@@ -181,6 +182,13 @@ export class Orchestrator {
           workflowPlan,
         }),
       );
+      completeSyntheticPlanningSteps({
+        store: this.store,
+        taskId,
+        workflowPlan,
+        assignedTo: classified.assignedTo,
+        outputRef: obsidianPath,
+      });
 
       await this.notifier.taskCreated({
         taskId,
@@ -190,6 +198,8 @@ export class Orchestrator {
       });
 
       const agent = this.requireAgent(classified.assignedTo);
+      const workerStep = primaryWorkerStepForRole(workflowPlan, classified.assignedTo);
+      const reviewStep = workflowPlan.steps.find((step) => step.action === "review");
       let prompt = effectiveContent;
       let latestReportPath = "";
       let latestReviewPath: string | undefined;
@@ -205,6 +215,7 @@ export class Orchestrator {
 
         this.store.updateTaskStatus(taskId, "running");
         prompt = appendSteeringContext(prompt, this.store.consumeSteeringMessages(taskId));
+        markWorkflowStep(this.store, taskId, workerStep, "running");
         const result = await this.runWorkerRound({
           taskId,
           role: classified.assignedTo,
@@ -216,6 +227,10 @@ export class Orchestrator {
         latestReportPath = result.reportPath;
 
         if (!result.result.ok) {
+          markWorkflowStep(this.store, taskId, workerStep, "failed", {
+            outputRef: latestReportPath,
+            error: result.result.error ?? "Worker failed.",
+          });
           this.store.updateTaskStatus(taskId, "failed");
           await this.notifier.failed({ taskId, reportPath: latestReportPath, reason: result.result.error });
           return {
@@ -226,6 +241,8 @@ export class Orchestrator {
           };
         }
 
+        markWorkflowStep(this.store, taskId, workerStep, "completed", { outputRef: latestReportPath });
+        markWorkflowStep(this.store, taskId, reviewStep, "running");
         const review = await runDirectorReview({
           taskId,
           originalPrompt: effectiveContent,
@@ -240,6 +257,7 @@ export class Orchestrator {
 
         latestReviewPath = review.path;
         latestVerdict = review.verdict;
+        markWorkflowStep(this.store, taskId, reviewStep, "completed", { outputRef: review.path });
         this.store.setTaskReviewRound(taskId, round);
         this.store.recordArtifact({
           id: `ART-${taskId}-review-r${round}-${Date.now()}`,
@@ -251,6 +269,7 @@ export class Orchestrator {
         await this.notifier.reviewResult({ taskId, verdict: review.verdict, reviewPath: review.path, round });
 
         if (review.verdict === "APPROVED") {
+          markPendingWorkflowSteps(this.store, taskId, workflowPlan, "skipped", "Workflow completed before optional steps were needed.");
           this.store.updateTaskStatus(taskId, "approved");
           const approvedPath = await this.writeApprovedSummary({
             taskId,
@@ -283,6 +302,7 @@ export class Orchestrator {
         }
 
         if (review.verdict !== "NEEDS_REVISION") {
+          markPendingWorkflowSteps(this.store, taskId, workflowPlan, "skipped", `Stopped after terminal verdict ${review.verdict}.`);
           const status = statusFromVerdict(review.verdict);
           this.store.updateTaskStatus(taskId, status);
           await this.notifier.blocked({
@@ -309,6 +329,7 @@ export class Orchestrator {
         });
       }
 
+      markPendingWorkflowSteps(this.store, taskId, workflowPlan, "failed", `Exceeded MAX_REVIEW_ROUNDS=${this.config.MAX_REVIEW_ROUNDS}`);
       this.store.updateTaskStatus(taskId, "failed");
       await this.notifier.failed({
         taskId,
@@ -526,6 +547,70 @@ export class Orchestrator {
     if (role === "builder") return this.config.CODEX_COMMAND;
     if (role === "designer") return this.config.GEMINI_IMAGE_MODEL;
     return this.config.CLAUDE_CODE_COMMAND;
+  }
+}
+
+function completeSyntheticPlanningSteps(input: {
+  store: RuntimeStore;
+  taskId: string;
+  workflowPlan: WorkflowPlan;
+  assignedTo: AgentRole;
+  outputRef: string;
+}): void {
+  if (input.assignedTo === "director") return;
+  for (const step of input.workflowPlan.steps.filter((candidate) => candidate.action === "plan")) {
+    markWorkflowStep(input.store, input.taskId, step, "running");
+    markWorkflowStep(input.store, input.taskId, step, "completed", { outputRef: input.outputRef });
+  }
+}
+
+function primaryWorkerStepForRole(workflowPlan: WorkflowPlan, role: AgentRole): PlannedWorkflowStep | undefined {
+  const actionByRole: Record<AgentRole, string> = {
+    director: "plan",
+    builder: "implement",
+    factory: "generate-content",
+    designer: "generate-image",
+  };
+  return workflowPlan.steps.find((step) => step.action === actionByRole[role]) ?? workflowPlan.steps[0];
+}
+
+function markWorkflowStep(
+  store: RuntimeStore,
+  taskId: string,
+  step: PlannedWorkflowStep | undefined,
+  status: "running" | "completed" | "skipped" | "failed",
+  options: { outputRef?: string; error?: string } = {},
+): void {
+  if (!step) return;
+  store.updateWorkflowStepRun({
+    taskId,
+    stepId: step.id,
+    status,
+    outputRef: options.outputRef,
+    error: options.error,
+  });
+}
+
+function markPendingWorkflowSteps(
+  store: RuntimeStore,
+  taskId: string,
+  workflowPlan: WorkflowPlan,
+  status: "skipped" | "failed",
+  error: string,
+): void {
+  const pendingStepIds = new Set(
+    store.listWorkflowStepRuns(taskId)
+      .filter((step) => step.status === "pending" || step.status === "running")
+      .map((step) => step.stepId),
+  );
+
+  for (const step of workflowPlan.steps.filter((candidate) => pendingStepIds.has(candidate.id))) {
+    store.updateWorkflowStepRun({
+      taskId,
+      stepId: step.id,
+      status: step.required ? status : "skipped",
+      error,
+    });
   }
 }
 
