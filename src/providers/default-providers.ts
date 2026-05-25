@@ -2,13 +2,25 @@ import { BuilderAgent } from "../agents/builder";
 import { DesignerAgent } from "../agents/designer";
 import { DirectorAgent } from "../agents/director";
 import { FactoryAgent } from "../agents/factory";
+import type { RuntimeConfig } from "../config";
 import type { AgentAdapter, AgentRole } from "../runtime/types";
-import type { AgentProviderFactory, AgentProviderFactoryInput, ProviderHealth } from "./types";
+import type { AgentProviderFactory, AgentProviderFactoryInput, ProviderHealth, ProviderKind } from "./types";
 
 function assertRole(input: AgentProviderFactoryInput, expected: AgentRole): void {
   if (input.role !== expected) {
     throw new Error(`Provider ${input.roleDefinition?.provider ?? "unknown"} cannot create agent for role ${input.role}; expected ${expected}.`);
   }
+}
+
+function imageProviderHealth(config: RuntimeConfig, id: "nanobanana" | "gemini-image", kind: ProviderKind): ProviderHealth {
+  return {
+    id,
+    kind,
+    ok: Boolean(config.GEMINI_API_KEY && config.GEMINI_IMAGE_MODEL),
+    detail: config.GEMINI_API_KEY
+      ? `Image model configured: ${config.GEMINI_IMAGE_MODEL}`
+      : "GEMINI_API_KEY is not configured.",
+  };
 }
 
 export const ClaudeCodeProviderFactory: AgentProviderFactory = {
@@ -72,21 +84,20 @@ export const NanoBananaProviderFactory: AgentProviderFactory = {
     return new DesignerAgent(input.config);
   },
   async healthCheck(config): Promise<ProviderHealth> {
-    return {
-      id: "nanobanana",
-      kind: "nanobanana",
-      ok: Boolean(config.GEMINI_API_KEY && config.GEMINI_IMAGE_MODEL),
-      detail: config.GEMINI_API_KEY
-        ? `Image model configured: ${config.GEMINI_IMAGE_MODEL}`
-        : "GEMINI_API_KEY is not configured.",
-    };
+    return imageProviderHealth(config, "nanobanana", "nanobanana");
   },
 };
 
 export const GeminiImageProviderFactory: AgentProviderFactory = {
-  ...NanoBananaProviderFactory,
   id: "gemini-image",
   kind: "gemini-image",
+  createAgent(input: AgentProviderFactoryInput): AgentAdapter {
+    assertRole(input, "designer");
+    return new DesignerAgent(input.config);
+  },
+  async healthCheck(config): Promise<ProviderHealth> {
+    return imageProviderHealth(config, "gemini-image", "gemini-image");
+  },
 };
 
 export const DefaultProviderFactories: AgentProviderFactory[] = [
