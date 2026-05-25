@@ -7,7 +7,7 @@ export const DefaultRoleDefinitions: RoleDefinition[] = [
     legacyRole: "director",
     provider: "claude-code",
     command: "claude",
-    capabilities: ["plan", "review", "create-tasks" as never],
+    capabilities: ["plan", "review"],
     permissions: {
       canWriteFiles: false,
       canRunCommands: false,
