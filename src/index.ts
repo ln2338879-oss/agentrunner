@@ -9,9 +9,15 @@ import { DiscordNotifier } from "./discord/notifier";
 import { registerSlashCommands } from "./discord/slash-commands";
 import { RoleRegistry } from "./roles/registry";
 import { createDefaultProviderRegistry } from "./providers/registry";
+import { discordMultiBotWarnings, validateDiscordMultiBotConfig } from "./discord/multi-bot-config";
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  validateDiscordMultiBotConfig(config);
+  for (const warning of discordMultiBotWarnings(config)) {
+    console.warn(`[discord-config] ${warning}`);
+  }
+
   const store = await RuntimeStore.open(config.DATABASE_PATH);
   const vault = new VaultManager(config.OBSIDIAN_VAULT_PATH);
   const orchestrator = new Orchestrator(store, vault, config);
@@ -42,6 +48,8 @@ async function main(): Promise<void> {
       token: config.BUILDER_DISCORD_TOKEN,
       channelId: config.DEV_TASKS_CHANNEL_ID,
       config,
+      orchestrator,
+      store,
     });
     loginPromises.push(builderBot.login(config.BUILDER_DISCORD_TOKEN));
   }
@@ -52,6 +60,8 @@ async function main(): Promise<void> {
       token: config.FACTORY_DISCORD_TOKEN,
       channelId: config.CONTENT_FACTORY_CHANNEL_ID,
       config,
+      orchestrator,
+      store,
     });
     loginPromises.push(factoryBot.login(config.FACTORY_DISCORD_TOKEN));
   }
@@ -62,12 +72,16 @@ async function main(): Promise<void> {
       token: config.DESIGNER_DISCORD_TOKEN,
       channelId: config.DESIGN_TASKS_CHANNEL_ID,
       config,
+      orchestrator,
+      store,
     });
     loginPromises.push(designerBot.login(config.DESIGNER_DISCORD_TOKEN));
   }
 
   if (loginPromises.length === 0) {
-    console.log("AgentRunner initialized without Discord login. Set bot tokens in .env to start the multi-bot runtime.");
+    console.log(
+      "AgentRunner initialized without Discord login. Set bot tokens in .env to start the multi-bot runtime.",
+    );
     return;
   }
 
