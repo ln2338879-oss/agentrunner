@@ -45,6 +45,38 @@ When `DESIGNER_DISCORD_TOKEN` is set, `src/index.ts` logs in a Designer worker b
 
 The dedicated bot currently acknowledges visual task handoffs. Actual execution remains coordinated through AgentRunner runtime adapters, task state, and Obsidian artifacts.
 
+## Reference image attachments
+
+When a user attaches an image to a DirectorBot message, AgentRunner already persists the attachment under `ATTACHMENTS_DIR` and appends a `# Discord Attachments` block to the task prompt.
+
+DesignerAgent now scans that block for image attachments with `local_path` and passes those files to Gemini as inline image parts.
+
+```text
+# Discord Attachments
+
+- filename: hero.png
+  content_type: image/png
+  kind: image
+  local_path: ./data/attachments/123/hero.png
+```
+
+The Gemini request is built as:
+
+```text
+inlineData image part(s)
+text design prompt
+```
+
+This supports prompts like:
+
+```text
+이 첨부 이미지 스타일로 픽셀아트 캐릭터를 만들어줘
+이 로고를 더 판타지 게임풍으로 바꿔줘
+첨부한 캐릭터를 스프라이트 아이콘 느낌으로 다시 디자인해줘
+```
+
+For small images, Gemini supports inline image data passed to `generateContent`; larger or reusable images should be moved to a future Files API flow.
+
 ## Routing examples
 
 Requests containing visual design or image generation keywords are routed to `designer`:
@@ -112,6 +144,7 @@ The Designer agent records:
 - a Markdown worker report
 - generated image files
 - `design_image` artifact rows for saved image files
+- reference image paths used for the design request
 
 ## Current scope
 
@@ -126,8 +159,8 @@ Designer Discord worker bot → worker handoff acknowledgement
 
 Recommended next steps:
 
-1. Add reference-image attachment support.
-2. Add image edit/inpaint workflows.
-3. Add dashboard image previews.
-4. Add a human approval queue for sensitive design/image actions.
-5. Make the Designer Discord worker claim and execute queued design tasks directly.
+1. Add image edit/inpaint workflows.
+2. Add dashboard image previews.
+3. Add a human approval queue for sensitive design/image actions.
+4. Make the Designer Discord worker claim and execute queued design tasks directly.
+5. Add Files API support for large or reusable reference images.
