@@ -56,8 +56,18 @@ async function main(): Promise<void> {
     loginPromises.push(factoryBot.login(config.FACTORY_DISCORD_TOKEN));
   }
 
+  if (config.DESIGNER_DISCORD_TOKEN) {
+    const designerBot = createWorkerBot({
+      role: "designer",
+      token: config.DESIGNER_DISCORD_TOKEN,
+      channelId: config.DESIGN_TASKS_CHANNEL_ID,
+      config,
+    });
+    loginPromises.push(designerBot.login(config.DESIGNER_DISCORD_TOKEN));
+  }
+
   if (loginPromises.length === 0) {
-    console.log("AgentRunner initialized without Discord login. Set bot tokens in .env to start the 3-bot runtime.");
+    console.log("AgentRunner initialized without Discord login. Set bot tokens in .env to start the multi-bot runtime.");
     return;
   }
 
