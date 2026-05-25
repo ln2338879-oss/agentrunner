@@ -5,6 +5,7 @@ export const WorkflowActionSchema = z.enum([
   "plan",
   "implement",
   "generate-content",
+  "generate-image",
   "research",
   "review",
   "arbitrate",
@@ -26,7 +27,7 @@ export const WorkflowDefinitionSchema = z.object({
   id: z.string().min(1),
   label: z.string().optional(),
   description: z.string().optional(),
-  defaultForTaskTypes: z.array(z.enum(["planning", "implementation", "content", "review"])).default([]),
+  defaultForTaskTypes: z.array(z.enum(["planning", "implementation", "content", "design", "review"])).default([]),
   steps: z.array(WorkflowStepSchema).min(1),
 });
 

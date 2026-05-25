@@ -9,6 +9,39 @@ export interface ClassifiedTask {
 export function classifyTask(message: string): ClassifiedTask {
   const normalized = message.toLowerCase();
 
+  if (containsAny(normalized, [
+    "디자인",
+    "이미지",
+    "일러스트",
+    "포스터",
+    "배너",
+    "썸네일",
+    "로고",
+    "목업",
+    "시안",
+    "컨셉아트",
+    "픽셀아트",
+    "스프라이트",
+    "아이콘",
+    "image",
+    "illustration",
+    "poster",
+    "banner",
+    "thumbnail",
+    "logo",
+    "mockup",
+    "concept art",
+    "pixel art",
+    "sprite",
+    "icon",
+  ])) {
+    return {
+      type: "design",
+      assignedTo: "designer",
+      reason: "Visual design or image generation request detected.",
+    };
+  }
+
   if (containsAny(normalized, ["구현", "버그", "코드", "빌드", "테스트", "리팩토링", "fix", "bug", "code", "build", "test"])) {
     return {
       type: "implementation",

@@ -132,6 +132,10 @@ export class Orchestrator {
       policyEngine.requireAllowed("content_generation");
     }
 
+    if (classified.assignedTo === "designer") {
+      policyEngine.requireAllowed("image_generation");
+    }
+
     this.store.createTask({
       id: taskId,
       title,
@@ -352,7 +356,7 @@ export class Orchestrator {
       finishedAt: new Date().toISOString(),
     });
 
-    const reportFolder = input.role === "builder" ? "05_BuilderReports" : input.role === "factory" ? "06_FactoryOutputs" : "04_Reviews";
+    const reportFolder = reportFolderForRole(input.role);
     const reportPath = `${reportFolder}/${input.taskId}-${input.role}-round-${input.round}.md`;
 
     await this.vault.writeNote(
@@ -372,6 +376,15 @@ export class Orchestrator {
       path: reportPath,
       createdBy: input.role,
     });
+    for (const artifact of result.artifacts ?? []) {
+      this.store.recordArtifact({
+        id: `ART-${input.taskId}-${input.role}-file-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        taskId: input.taskId,
+        type: input.role === "designer" ? "design_image" : "agent_file",
+        path: artifact,
+        createdBy: input.role,
+      });
+    }
     await this.notifier.workerReport({
       taskId: input.taskId,
       role: input.role,
@@ -511,8 +524,16 @@ export class Orchestrator {
   private modelNameFor(role: AgentRole): string {
     if (role === "factory") return this.config.OLLAMA_MODEL;
     if (role === "builder") return this.config.CODEX_COMMAND;
+    if (role === "designer") return this.config.GEMINI_IMAGE_MODEL;
     return this.config.CLAUDE_CODE_COMMAND;
   }
+}
+
+function reportFolderForRole(role: AgentRole): string {
+  if (role === "builder") return "05_BuilderReports";
+  if (role === "factory") return "06_FactoryOutputs";
+  if (role === "designer") return "06_DesignerOutputs";
+  return "04_Reviews";
 }
 
 function buildRevisionPrompt(input: {

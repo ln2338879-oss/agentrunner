@@ -30,6 +30,10 @@ describe("WorkflowRegistry", () => {
     const contentPlan = registry.plan(undefined, "content");
     expect(contentPlan.workflowId).toBe("plan-generate-review");
     expect(contentPlan.steps.find((step) => step.id === "generate")?.resolvedRoleId).toBe("generator");
+
+    const designPlan = registry.plan(undefined, "design");
+    expect(designPlan.workflowId).toBe("plan-design-review");
+    expect(designPlan.steps.find((step) => step.id === "design")?.resolvedRoleId).toBe("designer");
   });
 
   test("reports unknown roles and dependencies", () => {

@@ -1,14 +1,13 @@
 profiles:
   - id: game-dev
     name: Game Development
-    description: Game planning, implementation, content generation, and review.
+    description: Game planning, implementation, content generation, design, and review.
     defaultWorkflow: plan-build-review
     skills:
       - code-style
     policy:
       allowCodeChanges: true
       allowContentGeneration: true
-      requireDirectorReview: true
       allowFileWrites: true
       allowShellCommands: true
       allowTests: true
@@ -16,19 +15,19 @@ profiles:
       allowApprovedTaskCommand: true
       allowSystemdRestart: false
       allowNetworkAccess: false
+      requireDirectorReview: true
       requireHumanApprovalFor:
         - systemd_restart
 
   - id: content-lab
     name: Content Lab
-    description: Content, data, asset, and writing generation without code changes.
+    description: Content, data, asset, image, and writing generation without code changes.
     defaultWorkflow: plan-generate-review
     skills:
       - content-style
     policy:
       allowCodeChanges: false
       allowContentGeneration: true
-      requireDirectorReview: true
       allowFileWrites: true
       allowShellCommands: false
       allowTests: false
@@ -36,6 +35,26 @@ profiles:
       allowApprovedTaskCommand: false
       allowSystemdRestart: false
       allowNetworkAccess: false
+      requireDirectorReview: true
+      requireHumanApprovalFor: []
+
+  - id: design-lab
+    name: Design Lab
+    description: Visual design and image generation workspace.
+    defaultWorkflow: plan-design-review
+    skills:
+      - content-style
+    policy:
+      allowCodeChanges: false
+      allowContentGeneration: true
+      allowFileWrites: true
+      allowShellCommands: false
+      allowTests: false
+      allowBuilds: false
+      allowApprovedTaskCommand: false
+      allowSystemdRestart: false
+      allowNetworkAccess: false
+      requireDirectorReview: true
       requireHumanApprovalFor: []
 
   - id: software-dev
@@ -47,7 +66,6 @@ profiles:
     policy:
       allowCodeChanges: true
       allowContentGeneration: false
-      requireDirectorReview: true
       allowFileWrites: true
       allowShellCommands: true
       allowTests: true
@@ -55,6 +73,7 @@ profiles:
       allowApprovedTaskCommand: true
       allowSystemdRestart: false
       allowNetworkAccess: false
+      requireDirectorReview: true
       requireHumanApprovalFor:
         - approved_task_command
         - systemd_restart
@@ -77,6 +96,7 @@ groups:
       - director
       - builder
       - factory
+      - designer
     skills:
       - runebound-design
       - item-schema
@@ -100,8 +120,28 @@ groups:
     allowedRoles:
       - director
       - factory
+      - designer
     skills:
       - monster-schema
+    policy:
+      allowCodeChanges: false
+      allowContentGeneration: true
+      requireDirectorReview: true
+
+  - id: design-lab
+    name: Visual Design Lab
+    profileId: design-lab
+    workspaceId: visual-design
+    workspaceName: Visual Design Lab
+    discordChannelIds:
+      - "222222222222222222"
+    projectRoot: /opt/design-projects
+    obsidianVaultPath: /opt/obsidian-vaults/AgentRunnerVault
+    allowedRoles:
+      - director
+      - designer
+    skills:
+      - visual-style
     policy:
       allowCodeChanges: false
       allowContentGeneration: true

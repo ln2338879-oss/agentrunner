@@ -3,6 +3,7 @@ import { z } from "zod";
 export const PolicyActionSchema = z.enum([
   "code_changes",
   "content_generation",
+  "image_generation",
   "write_files",
   "run_shell_command",
   "run_tests",
@@ -15,6 +16,7 @@ export const PolicyActionSchema = z.enum([
 export const RuntimePolicySchema = z.object({
   allowCodeChanges: z.boolean().default(true),
   allowContentGeneration: z.boolean().default(true),
+  allowImageGeneration: z.boolean().default(true),
   requireDirectorReview: z.boolean().default(true),
   allowFileWrites: z.boolean().default(true),
   allowShellCommands: z.boolean().default(true),
@@ -33,6 +35,7 @@ export type PolicyDecisionStatus = "allowed" | "denied" | "needs_human";
 export const DefaultRuntimePolicy: RuntimePolicy = {
   allowCodeChanges: true,
   allowContentGeneration: true,
+  allowImageGeneration: true,
   requireDirectorReview: true,
   allowFileWrites: true,
   allowShellCommands: true,

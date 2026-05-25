@@ -1,8 +1,8 @@
 import type { RuntimeConfig } from "../config";
 
-export type AgentRole = "director" | "builder" | "factory";
+export type AgentRole = "director" | "builder" | "factory" | "designer";
 
-export type TaskType = "planning" | "implementation" | "content" | "review";
+export type TaskType = "planning" | "implementation" | "content" | "design" | "review";
 
 export type TaskStatus =
   | "pending"

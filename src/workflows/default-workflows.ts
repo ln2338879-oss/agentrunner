@@ -90,6 +90,38 @@ export const DefaultWorkflowDefinitions: WorkflowDefinition[] = [
     ],
   },
   {
+    id: "plan-design-review",
+    label: "Plan, Design, Review",
+    description: "Visual design and image generation workflow for DesignerAgent.",
+    defaultForTaskTypes: ["design"],
+    steps: [
+      {
+        id: "plan",
+        role: "planner",
+        action: "plan",
+        dependsOn: [],
+        required: true,
+        continueOnFailure: false,
+      },
+      {
+        id: "design",
+        role: "designer",
+        action: "generate-image",
+        dependsOn: ["plan"],
+        required: true,
+        continueOnFailure: false,
+      },
+      {
+        id: "review",
+        role: "reviewer",
+        action: "review",
+        dependsOn: ["design"],
+        required: true,
+        continueOnFailure: false,
+      },
+    ],
+  },
+  {
     id: "research-report",
     label: "Research Report",
     description: "Research, review, and summarize workflow for generic information tasks.",

@@ -1,5 +1,6 @@
 import { loadConfig } from "../config";
 import { BuilderAgent } from "../agents/builder";
+import { DesignerAgent } from "../agents/designer";
 import { DirectorAgent } from "../agents/director";
 import { FactoryAgent } from "../agents/factory";
 import { RuntimeStore } from "../db/runtime-store";
@@ -12,7 +13,7 @@ async function main(): Promise<void> {
   const role = config.AGENTRUNNER_WORKER_ROLE;
 
   if (!role) {
-    throw new Error("AGENTRUNNER_WORKER_ROLE is required. Use director, builder, or factory.");
+    throw new Error("AGENTRUNNER_WORKER_ROLE is required. Use director, builder, factory, or designer.");
   }
 
   const agent = createAgent(role, config);
@@ -51,7 +52,8 @@ async function main(): Promise<void> {
 function createAgent(role: AgentRole, config: ReturnType<typeof loadConfig>): AgentAdapter {
   if (role === "director") return new DirectorAgent(config);
   if (role === "builder") return new BuilderAgent(config);
-  return new FactoryAgent(config);
+  if (role === "factory") return new FactoryAgent(config);
+  return new DesignerAgent(config);
 }
 
 function sleep(ms: number): Promise<void> {

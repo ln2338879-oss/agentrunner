@@ -34,6 +34,19 @@ describe("workflow routing integration", () => {
     expect(workflowPlan.steps.map((step) => step.id)).toEqual(["plan", "build", "review", "arbitrate-if-blocked"]);
   });
 
+  test("plans design workflow from visual request", () => {
+    const classified = classifyTask("픽셀아트 포스터 디자인 만들어줘");
+    const workflowPlan = planWorkflowForTask({
+      classified,
+      workflowRegistry: createDefaultWorkflowRegistry(),
+    });
+
+    expect(classified.type).toBe("design");
+    expect(classified.assignedTo).toBe("designer");
+    expect(workflowPlan.workflowId).toBe("plan-design-review");
+    expect(workflowPlan.steps.map((step) => step.id)).toEqual(["plan", "design", "review"]);
+  });
+
   test("persists workflow plan metadata on task rows", async () => {
     const store = await createTempStore();
     const workflowPlan = createDefaultWorkflowRegistry().plan(undefined, "content");

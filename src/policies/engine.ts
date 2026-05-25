@@ -35,16 +35,19 @@ export class PolicyEngine {
   }
 
   private isAllowed(action: PolicyAction): boolean {
-    if (action === "code_changes") return this.policy.allowCodeChanges;
-    if (action === "content_generation") return this.policy.allowContentGeneration;
-    if (action === "write_files") return this.policy.allowFileWrites;
-    if (action === "run_shell_command") return this.policy.allowShellCommands;
-    if (action === "run_tests") return this.policy.allowTests && this.policy.allowShellCommands;
-    if (action === "run_build") return this.policy.allowBuilds && this.policy.allowShellCommands;
-    if (action === "approved_task_command") return this.policy.allowApprovedTaskCommand && this.policy.allowShellCommands;
-    if (action === "systemd_restart") return this.policy.allowSystemdRestart && this.policy.allowShellCommands;
-    if (action === "network_access") return this.policy.allowNetworkAccess;
-    return false;
+    const permissions: Record<PolicyAction, boolean> = {
+      code_changes: this.policy.allowCodeChanges,
+      content_generation: this.policy.allowContentGeneration,
+      image_generation: this.policy.allowImageGeneration && this.policy.allowFileWrites,
+      write_files: this.policy.allowFileWrites,
+      run_shell_command: this.policy.allowShellCommands,
+      run_tests: this.policy.allowTests && this.policy.allowShellCommands,
+      run_build: this.policy.allowBuilds && this.policy.allowShellCommands,
+      approved_task_command: this.policy.allowApprovedTaskCommand && this.policy.allowShellCommands,
+      systemd_restart: this.policy.allowSystemdRestart && this.policy.allowShellCommands,
+      network_access: this.policy.allowNetworkAccess,
+    };
+    return permissions[action] ?? false;
   }
 }
 
