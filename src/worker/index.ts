@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  while (true) {
+  for (;;) {
     const result = await poller.pollOnce();
     if (result.claimed) {
       console.log(`[worker:${role}] processed ${result.taskId} as ${result.status}`);
