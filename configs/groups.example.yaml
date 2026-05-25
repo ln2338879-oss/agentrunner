@@ -1,10 +1,48 @@
+profiles:
+  - id: game-dev
+    name: Game Development
+    description: Game planning, implementation, content generation, and review.
+    defaultWorkflow: plan-build-review
+    skills:
+      - code-style
+    policy:
+      allowCodeChanges: true
+      allowContentGeneration: true
+      requireDirectorReview: true
+
+  - id: content-lab
+    name: Content Lab
+    description: Content, data, asset, and writing generation without code changes.
+    defaultWorkflow: plan-generate-review
+    skills:
+      - content-style
+    policy:
+      allowCodeChanges: false
+      allowContentGeneration: true
+      requireDirectorReview: true
+
+  - id: software-dev
+    name: Software Development
+    description: General coding and automation workflow.
+    defaultWorkflow: plan-build-review
+    skills:
+      - code-style
+    policy:
+      allowCodeChanges: true
+      allowContentGeneration: false
+      requireDirectorReview: true
+
 groups:
   - id: runebound-dev
     name: Runebound Development
+    profileId: game-dev
+    workspaceId: runebound
+    workspaceName: Runebound
     discordChannelIds:
       - "000000000000000000"
     projectRoot: /opt/game-projects/runebound
     obsidianVaultPath: /opt/obsidian-vaults/AgentRunnerVault
+    artifactRoot: /opt/obsidian-vaults/AgentRunnerVault
     factoryModel: gemma
     builderTestCommand: bun test
     builderBuildCommand: bun run build
@@ -15,7 +53,6 @@ groups:
     skills:
       - runebound-design
       - item-schema
-      - code-style
     policy:
       allowCodeChanges: true
       allowContentGeneration: true
@@ -23,6 +60,9 @@ groups:
 
   - id: content-lab
     name: Content Factory Lab
+    profileId: content-lab
+    workspaceId: runebound-content
+    workspaceName: Runebound Content Lab
     discordChannelIds:
       - "111111111111111111"
     projectRoot: /opt/game-projects/runebound
@@ -32,7 +72,6 @@ groups:
       - director
       - factory
     skills:
-      - content-style
       - monster-schema
     policy:
       allowCodeChanges: false

@@ -93,7 +93,7 @@ export class Orchestrator {
     const group = this.groupConfig?.resolveByChannel(input.discordChannelId) ?? null;
     const skillContext = await loadSkillContext({
       skillsDir: this.config.SKILLS_DIR,
-      skillIds: group?.skills ?? [],
+      skillIds: group?.effectiveSkills ?? [],
     });
     const baseEffectiveContent = skillContext
       ? [skillContext, "", "# User Request", "", input.content].join("\n")
@@ -111,6 +111,7 @@ export class Orchestrator {
     const workflowPlan = planWorkflowForTask({
       classified,
       workflowRegistry: this.workflowRegistry,
+      workflowId: group?.defaultWorkflow ?? group?.profile?.defaultWorkflow,
     });
     const taskId = `TASK-${Date.now()}`;
     const title = input.content.slice(0, 60).replace(/\s+/g, " ") || "Untitled task";
@@ -121,11 +122,11 @@ export class Orchestrator {
       throw new Error(`Role ${classified.assignedTo} is not allowed in group ${group.id}.`);
     }
 
-    if (group && classified.assignedTo === "builder" && !group.policy.allowCodeChanges) {
+    if (group && classified.assignedTo === "builder" && !group.effectivePolicy.allowCodeChanges) {
       throw new Error(`Code changes are disabled in group ${group.id}.`);
     }
 
-    if (group && classified.assignedTo === "factory" && !group.policy.allowContentGeneration) {
+    if (group && classified.assignedTo === "factory" && !group.effectivePolicy.allowContentGeneration) {
       throw new Error(`Content generation is disabled in group ${group.id}.`);
     }
 
@@ -135,7 +136,7 @@ export class Orchestrator {
       type: classified.type,
       assignedTo: classified.assignedTo,
       obsidianPath,
-      groupId: group?.id,
+      groupId: group?.workspaceId ?? group?.id,
       workflowPlan,
     });
 
