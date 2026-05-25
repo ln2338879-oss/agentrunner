@@ -242,7 +242,7 @@ export class RuntimeStore {
   }
 
   claimReadyWorkflowStep(input: {
-    role: AgentRole;
+    roleId: string;
     owner: string;
     ttlMinutes: number;
     now?: string;
@@ -258,11 +258,11 @@ export class RuntimeStore {
       FROM workflow_step_runs step
       JOIN tasks task ON task.id = step.task_id
       WHERE step.status = 'pending'
-        AND step.resolved_role_id = $role
+        AND step.resolved_role_id = $roleId
         AND task.status IN ('pending', 'running', 'needs_revision')
         AND (step.locked_by IS NULL OR step.lock_expires_at IS NULL OR step.lock_expires_at <= $nowIso)
       ORDER BY task.created_at ASC, step.step_index ASC
-    `).all({ $role: input.role, $nowIso: nowIso }) as Array<{
+    `).all({ $roleId: input.roleId, $nowIso: nowIso }) as Array<{
       id: string;
       taskId: string;
       stepId: string;
@@ -277,11 +277,11 @@ export class RuntimeStore {
       SET status = 'running', locked_by = $owner, lock_expires_at = $expiresAt, started_at = COALESCE(started_at, $nowIso), updated_at = $nowIso
       WHERE id = $id
         AND status = 'pending'
-        AND resolved_role_id = $role
+        AND resolved_role_id = $roleId
         AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso)
     `).run({
       $id: ready.id,
-      $role: input.role,
+      $roleId: input.roleId,
       $owner: input.owner,
       $expiresAt: expiresAt,
       $nowIso: nowIso,
