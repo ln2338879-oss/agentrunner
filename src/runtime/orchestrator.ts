@@ -6,7 +6,7 @@ import { NullNotifier } from "../discord/notifier";
 import type { GroupConfigManager } from "../groups/group-config";
 import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
-import { runDirectorReview } from "../review/review-loop";
+import { runDirectorReview, statusFromVerdict } from "../review/review-loop";
 import { RoleRegistry } from "../roles/registry";
 import { classifyTask } from "../router/classify";
 import { planWorkflowForTask } from "../router/workflow-routing";
@@ -270,9 +270,14 @@ export class Orchestrator {
           };
         }
 
-        if (review.verdict === "BLOCKED") {
-          this.store.updateTaskStatus(taskId, "blocked");
-          await this.notifier.blocked({ taskId, reviewPath: latestReviewPath, reason: review.output });
+        if (review.verdict !== "NEEDS_REVISION") {
+          const status = statusFromVerdict(review.verdict);
+          this.store.updateTaskStatus(taskId, status);
+          await this.notifier.blocked({
+            taskId,
+            reviewPath: latestReviewPath,
+            reason: `${review.verdict}: ${review.output}`,
+          });
           return {
             taskId,
             assignedTo: classified.assignedTo,
