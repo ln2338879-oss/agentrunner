@@ -5,6 +5,8 @@ aliases:
   director: planner
   builder: builder
   factory: generator
+  designer: designer
+  design: designer
   worker: builder
   reviewer: reviewer
   arbiter: arbiter
@@ -46,6 +48,19 @@ roles:
     capabilities:
       - generate-content
     permissions:
+      requiresReview: true
+
+  - id: designer
+    label: Designer
+    legacyRole: designer
+    provider: nanobanana
+    model: gemini-3.1-flash-image-preview
+    capabilities:
+      - generate-image
+      - design-production
+      - write-files
+    permissions:
+      canWriteFiles: true
       requiresReview: true
 
   - id: researcher
