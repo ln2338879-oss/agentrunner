@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS workflow_step_runs (
   depends_on_json TEXT NOT NULL,
   required INTEGER NOT NULL,
   requires_review INTEGER NOT NULL,
+  locked_by TEXT,
+  lock_expires_at TEXT,
   started_at TEXT,
   finished_at TEXT,
   output_ref TEXT,
