@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   assigned_to TEXT NOT NULL,
   obsidian_path TEXT NOT NULL,
   current_round INTEGER NOT NULL DEFAULT 0,
+  workflow_id TEXT,
+  workflow_plan_json TEXT,
   locked_by TEXT,
   lock_expires_at TEXT,
   created_at TEXT NOT NULL,
