@@ -1,6 +1,6 @@
-# Workflow Step Executor Ledger
+# Workflow Step Executor
 
-AgentRunner workflows are now materialized into executable step records.
+AgentRunner workflows are materialized into executable step records and can now be claimed by worker executors.
 
 This is the transition point from workflow metadata to real team execution.
 
@@ -24,27 +24,64 @@ Each row stores:
 - dependency list
 - required flag
 - review requirement flag
+- lease owner
+- lease expiry
 - output reference
 - error
 - timestamps
 
-## Current execution behavior
+## Ready-step claim flow
 
-The current Orchestrator still runs the existing stable loop:
+Workers now try to claim ready workflow steps before falling back to the legacy pending-task queue.
 
 ```text
-task creation
-→ synthetic plan step completion
-→ primary worker step execution
-→ review step execution
-→ approved / revision / terminal verdict
+WorkerPoller.pollOnce()
+→ StepExecutor.runOnce()
+→ RuntimeStore.claimReadyWorkflowStep()
+→ dependency check
+→ workflow step lease
+→ agent.run()
+→ report artifact
+→ completed / failed step status
 ```
 
-The difference is that each workflow step now has a durable state row that can be inspected by the dashboard and future executors.
+A workflow step is claimable when:
+
+1. the step status is `pending`
+2. the resolved role id matches the worker role mapping
+3. all `dependsOn` steps are `completed` or `skipped`
+4. the step is unlocked or its lease expired
+5. the parent task is still open
+
+## Role mapping
+
+Runtime workers use `AgentRole`, while workflow rows store resolved role ids.
+
+```text
+director → planner
+builder  → builder
+factory  → generator
+designer → designer
+```
+
+## Current execution behavior
+
+The stable Orchestrator loop still exists and still updates workflow step state.
+
+The new independent path is:
+
+```text
+workflow step ledger
+→ ready-step claim
+→ role-specific worker execution
+→ workflow_step_report artifact
+```
+
+This means isolated workers can now execute a specific ready workflow step instead of only claiming whole pending tasks.
 
 ## Dashboard support
 
-Dashboard task details now include:
+Dashboard task details include:
 
 ```text
 workflowSteps
@@ -58,31 +95,34 @@ kind: workflow_step
 
 The root dashboard also shows workflow step counts by status.
 
-## Why this matters
+## Current scope
 
-Before this change, workflow plans were stored as metadata only. After this change, workflows have a persistent execution ledger.
+Implemented now:
 
-This enables the next phase:
+1. durable step leases
+2. ready-step dependency gating
+3. role-specific step claiming
+4. StepExecutor one-step execution
+5. worker poller step-first behavior
+6. step report artifacts
+7. failed required step marks task failed
 
-1. independent per-step claiming
-2. dependency checks
-3. parallel-ready DAG execution
-4. human approval gates per step
-5. worker bots directly claiming role-specific workflow steps
-6. retry with different provider/agent based on failed step state
+Still intentionally limited:
 
-## Current limitations
+1. Director/reviewer/arbiter step execution still needs a dedicated review-step executor path.
+2. Human approval gates are not yet first-class workflow steps.
+3. Parallel multi-step execution is now structurally possible but not yet coordinated by a scheduler process.
+4. Retry-with-different-agent still needs policy and provider fallback integration.
 
-This is not yet a full DAG executor. It intentionally keeps the existing Orchestrator behavior stable while adding a durable step ledger.
+## Next phase
 
-Follow-up work should move from:
-
-```text
-Orchestrator loop updates step rows
-```
-
-to:
+The next step is a scheduler loop that continuously claims and dispatches ready steps across roles:
 
 ```text
-StepExecutor claims ready steps and dispatches agents independently
+StepScheduler
+→ scan ready steps
+→ claim by resolved role
+→ dispatch to role agent/provider
+→ wait / poll / notify
+→ advance dependent steps
 ```
