@@ -49,7 +49,7 @@ export class ProviderRegistry {
     config: RuntimeConfig;
     roleRegistry?: RoleRegistry;
   }): AgentAdapter[] {
-    return (["director", "builder", "factory"] as AgentRole[]).map((role) => (
+    return (["director", "builder", "factory", "designer"] as AgentRole[]).map((role) => (
       this.createAgentForRole({ role, config: input.config, roleRegistry: input.roleRegistry })
     ));
   }
@@ -82,5 +82,6 @@ function providerForLegacyRole(role: AgentRole, roleDefinition?: RoleDefinition)
   if (roleDefinition?.provider) return roleDefinition.provider;
   if (role === "director") return "claude-code";
   if (role === "builder") return "codex";
-  return "ollama";
+  if (role === "factory") return "ollama";
+  return "nanobanana";
 }
