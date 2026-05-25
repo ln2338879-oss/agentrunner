@@ -31,6 +31,7 @@ export async function runDirectorReview(input: {
     role: "director",
     prompt,
     workspacePath: input.config.PROJECT_ROOT,
+    runtimeConfig: input.config,
   });
 
   const output = result.output || result.error || "Director review returned no output.";
