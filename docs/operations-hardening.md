@@ -41,12 +41,37 @@ When a prompt includes URLs and `BROWSER_COMMAND` is set, AgentRunner sends the 
 
 ## Worker Process Isolation
 
-The central Discord runtime still lives in `bun run start`, but workers can now boot as isolated role processes:
+The central Discord runtime still lives in `bun run start`, but workers can now run as isolated role processes that poll the SQLite queue for pending tasks assigned to their role.
 
 ```bash
 AGENTRUNNER_WORKER_ROLE=director bun run worker
 AGENTRUNNER_WORKER_ROLE=builder bun run worker
 AGENTRUNNER_WORKER_ROLE=factory bun run worker
+```
+
+Worker polling settings:
+
+```env
+WORKER_POLL_INTERVAL_MS=5000
+WORKER_POLL_ONCE=false
+```
+
+For one-shot validation:
+
+```bash
+AGENTRUNNER_WORKER_ROLE=builder WORKER_POLL_ONCE=true bun run worker
+```
+
+The worker flow is:
+
+```text
+pending task
+→ role worker claims task
+→ lease is acquired
+→ agent runs
+→ task_runs and artifact records are written
+→ task becomes completed or failed
+→ lease is released
 ```
 
 A systemd template is available:
@@ -62,8 +87,6 @@ sudo systemctl enable --now agentrunner-worker@director
 sudo systemctl enable --now agentrunner-worker@builder
 sudo systemctl enable --now agentrunner-worker@factory
 ```
-
-The current isolated worker entrypoint is a standby adapter boot path. It prepares the runtime for deeper queue-based worker execution while already allowing per-role process supervision.
 
 ## Doctor Checks
 
