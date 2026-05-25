@@ -93,8 +93,11 @@ Discord Result + Obsidian Notes
 ### 운영 / 배포
 
 - `bun run doctor`
+- `bun run proof`
 - `bun run dashboard`
 - `bun run worker`
+- `scripts/setup-local.sh`
+- `scripts/setup-ubuntu.sh`
 - systemd service template
 - worker systemd template
 - PM2 ecosystem template
@@ -110,6 +113,26 @@ cd agentrunner
 bun install
 cp .env.example .env
 ```
+
+로컬에서 내부 런타임 증명을 먼저 생성할 수 있습니다. 이 명령은 Discord 토큰이나 Claude/Codex/Ollama 인증 없이 SQLite, Obsidian Vault, worker queue polling, artifact 생성을 검증합니다.
+
+```bash
+bun run proof
+```
+
+또는 setup script를 사용할 수 있습니다.
+
+```bash
+bash scripts/setup-local.sh
+```
+
+Ubuntu 서버에서는 다음을 사용할 수 있습니다.
+
+```bash
+bash scripts/setup-ubuntu.sh
+```
+
+자세한 설치와 runtime proof 절차는 `docs/setup-and-proof.md`를 참고하세요.
 
 `.env`에 최소값을 설정합니다.
 
@@ -152,7 +175,8 @@ bun run start
 bun run start          # Discord AgentRunner runtime
 bun run dashboard      # Standalone dashboard server
 bun run doctor         # Runtime environment check
-bun run worker         # Isolated worker boot path
+bun run proof          # Local runtime proof generator
+bun run worker         # Isolated queue-polling worker
 bun run quality:check  # typecheck + lint + format check + test
 bun run build          # TypeScript build
 ```
@@ -348,12 +372,18 @@ GET /
 
 ## Worker Process Isolation
 
-역할별 worker entrypoint가 있습니다.
+역할별 worker entrypoint가 있습니다. 이제 worker는 SQLite queue에서 자기 역할의 pending task를 claim해서 실행합니다.
 
 ```bash
 AGENTRUNNER_WORKER_ROLE=director bun run worker
 AGENTRUNNER_WORKER_ROLE=builder bun run worker
 AGENTRUNNER_WORKER_ROLE=factory bun run worker
+```
+
+1회 검증:
+
+```bash
+AGENTRUNNER_WORKER_ROLE=builder WORKER_POLL_ONCE=true bun run worker
 ```
 
 systemd template:
@@ -369,8 +399,6 @@ sudo systemctl enable --now agentrunner-worker@director
 sudo systemctl enable --now agentrunner-worker@builder
 sudo systemctl enable --now agentrunner-worker@factory
 ```
-
-현재 worker entrypoint는 standby adapter boot path입니다. 역할별 프로세스 감독 기반은 준비되어 있지만, DB queue를 worker가 직접 consume하는 완전 분산 실행 구조는 다음 단계입니다.
 
 ## Obsidian Vault 구조
 
@@ -443,6 +471,7 @@ docs/deployment.md
 docs/operations-hardening.md
 docs/doctor-and-vision.md
 docs/advanced-runtime.md
+docs/setup-and-proof.md
 ```
 
 ## 품질 게이트
@@ -468,7 +497,25 @@ GitHub Actions의 `AgentRunner Quality Gate` workflow는 PR과 main push마다 i
 
 ## Runtime Proof 만들기
 
-이 프로젝트가 실제로 돌아간다는 증거를 남기려면 서버에서 다음 순서로 실행합니다.
+외부 인증 없이 내부 런타임 증명 파일을 만들 수 있습니다.
+
+```bash
+bun run proof
+```
+
+이 명령은 다음을 검증하고 `docs/proof/runtime-proof.md`를 생성합니다.
+
+```text
+Doctor internal path checks
+SQLite database creation
+Obsidian Vault folder creation
+sample task creation
+worker queue polling
+worker report artifact creation
+task completed status
+```
+
+실제 Discord까지 포함한 증거를 남기려면 서버에서 다음 순서로 실행합니다.
 
 ```bash
 bun install
@@ -498,7 +545,6 @@ Discord 응답 반환
 ## 현재 한계
 
 - 실제 장기 운영 로그는 아직 별도로 남겨야 합니다.
-- worker entrypoint는 아직 standby boot path입니다.
 - browser command는 기본 fetch 예시이며 headless Chromium daemon은 아닙니다.
 - voice transcription은 아직 구현되지 않았습니다.
 - LICENSE 파일은 별도로 추가해야 합니다.
