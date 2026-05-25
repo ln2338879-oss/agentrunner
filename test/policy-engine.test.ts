@@ -7,6 +7,7 @@ describe("PolicyEngine", () => {
 
     expect(policy.decide("code_changes").status).toBe("allowed");
     expect(policy.decide("content_generation").status).toBe("allowed");
+    expect(policy.decide("image_generation").status).toBe("allowed");
     expect(policy.decide("write_files").status).toBe("allowed");
     expect(policy.decide("run_shell_command").status).toBe("allowed");
     expect(policy.decide("approved_task_command").status).toBe("allowed");
@@ -17,6 +18,7 @@ describe("PolicyEngine", () => {
       allowCodeChanges: false,
       allowShellCommands: false,
       allowApprovedTaskCommand: true,
+      allowImageGeneration: false,
     });
 
     expect(policy.decide("code_changes")).toEqual({
@@ -25,15 +27,17 @@ describe("PolicyEngine", () => {
       reason: "Action code_changes is denied by policy.",
     });
     expect(policy.decide("approved_task_command").status).toBe("denied");
+    expect(policy.decide("image_generation").status).toBe("denied");
   });
 
   test("marks explicitly gated actions as requiring human approval", () => {
     const policy = createPolicyEngine({
-      requireHumanApprovalFor: ["approved_task_command", "systemd_restart"],
+      requireHumanApprovalFor: ["approved_task_command", "systemd_restart", "image_generation"],
     });
 
     expect(policy.decide("approved_task_command").status).toBe("needs_human");
     expect(policy.decide("systemd_restart").status).toBe("needs_human");
+    expect(policy.decide("image_generation").status).toBe("needs_human");
   });
 
   test("throws PolicyDeniedError from requireAllowed", () => {
