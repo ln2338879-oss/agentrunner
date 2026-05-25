@@ -1,0 +1,80 @@
+# Generic workflow registry example.
+# Workflows reference roles by role id or alias from configs/roles.yaml.
+
+defaultWorkflow: direct-run
+
+workflows:
+  - id: direct-run
+    label: Direct Run
+    description: Default planning/routing workflow.
+    defaultForTaskTypes:
+      - planning
+    steps:
+      - id: plan
+        role: planner
+        action: plan
+
+  - id: plan-build-review
+    label: Plan, Build, Review
+    description: General coding or automation workflow.
+    defaultForTaskTypes:
+      - implementation
+    steps:
+      - id: plan
+        role: planner
+        action: plan
+      - id: build
+        role: builder
+        action: implement
+        dependsOn:
+          - plan
+      - id: review
+        role: reviewer
+        action: review
+        dependsOn:
+          - build
+      - id: arbitrate-if-blocked
+        role: arbiter
+        action: arbitrate
+        dependsOn:
+          - review
+        required: false
+        continueOnFailure: true
+
+  - id: plan-generate-review
+    label: Plan, Generate, Review
+    description: Content, data, asset, or writing generation workflow.
+    defaultForTaskTypes:
+      - content
+    steps:
+      - id: plan
+        role: planner
+        action: plan
+      - id: generate
+        role: generator
+        action: generate-content
+        dependsOn:
+          - plan
+      - id: review
+        role: reviewer
+        action: review
+        dependsOn:
+          - generate
+
+  - id: research-report
+    label: Research Report
+    description: Generic research workflow.
+    steps:
+      - id: research
+        role: researcher
+        action: research
+      - id: review
+        role: reviewer
+        action: review
+        dependsOn:
+          - research
+      - id: summarize
+        role: planner
+        action: summarize
+        dependsOn:
+          - review
