@@ -30,6 +30,21 @@ DESIGNER_OUTPUT_DIR=./vault/AgentRunnerVault/06_DesignerOutputs
 
 `GEMINI_IMAGE_MODEL` defaults to `gemini-3.1-flash-image-preview`.
 
+## Optional Designer Discord worker bot
+
+The central DirectorBot path works without a separate Designer Discord bot.
+
+To also start a dedicated Designer worker bot, configure:
+
+```env
+DESIGNER_DISCORD_TOKEN=
+DESIGN_TASKS_CHANNEL_ID=
+```
+
+When `DESIGNER_DISCORD_TOKEN` is set, `src/index.ts` logs in a Designer worker bot using `DESIGN_TASKS_CHANNEL_ID` as its channel filter.
+
+The dedicated bot currently acknowledges visual task handoffs. Actual execution remains coordinated through AgentRunner runtime adapters, task state, and Obsidian artifacts.
+
 ## Routing examples
 
 Requests containing visual design or image generation keywords are routed to `designer`:
@@ -100,20 +115,19 @@ The Designer agent records:
 
 ## Current scope
 
-This implementation supports the central runtime path:
+This implementation supports both paths:
 
 ```text
 DirectorBot → Orchestrator → DesignerAgent
+Designer Discord worker bot → worker handoff acknowledgement
 ```
-
-A separate `DESIGNER_DISCORD_TOKEN` and `DESIGN_TASKS_CHANNEL_ID` are included for future worker-bot separation, but the first implementation does not require a separate Designer Discord bot.
 
 ## Follow-up work
 
 Recommended next steps:
 
-1. Add a dedicated Designer Discord worker bot.
-2. Add reference-image attachment support.
-3. Add image edit/inpaint workflows.
-4. Add dashboard image previews.
-5. Add a human approval queue for sensitive design/image actions.
+1. Add reference-image attachment support.
+2. Add image edit/inpaint workflows.
+3. Add dashboard image previews.
+4. Add a human approval queue for sensitive design/image actions.
+5. Make the Designer Discord worker claim and execute queued design tasks directly.
