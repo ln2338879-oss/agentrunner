@@ -3,12 +3,7 @@ import { existsSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
 import type { RuntimeConfig } from "../config";
-
-const DefaultGroupPolicy = {
-  allowCodeChanges: true,
-  allowContentGeneration: true,
-  requireDirectorReview: true,
-};
+import { DefaultRuntimePolicy, RuntimePolicySchema, type RuntimePolicy } from "../policies/types";
 
 const WorkspaceProfileSchema = z.object({
   id: z.string(),
@@ -17,11 +12,7 @@ const WorkspaceProfileSchema = z.object({
   defaultWorkflow: z.string().optional(),
   defaultRoles: z.record(z.string(), z.string()).default({}),
   skills: z.array(z.string()).default([]),
-  policy: z.object({
-    allowCodeChanges: z.boolean().default(true),
-    allowContentGeneration: z.boolean().default(true),
-    requireDirectorReview: z.boolean().default(true),
-  }).default(DefaultGroupPolicy),
+  policy: RuntimePolicySchema.default(DefaultRuntimePolicy),
 });
 
 const GroupSchema = z.object({
@@ -40,11 +31,7 @@ const GroupSchema = z.object({
   defaultWorkflow: z.string().optional(),
   allowedRoles: z.array(z.enum(["director", "builder", "factory"])).default(["director", "builder", "factory"]),
   skills: z.array(z.string()).default([]),
-  policy: z.object({
-    allowCodeChanges: z.boolean().default(true),
-    allowContentGeneration: z.boolean().default(true),
-    requireDirectorReview: z.boolean().default(true),
-  }).default(DefaultGroupPolicy),
+  policy: RuntimePolicySchema.default(DefaultRuntimePolicy),
 });
 
 const GroupConfigSchema = z.object({
@@ -56,7 +43,7 @@ export type WorkspaceProfileConfig = z.infer<typeof WorkspaceProfileSchema>;
 export type GroupRuntimeConfig = z.infer<typeof GroupSchema> & {
   profile?: WorkspaceProfileConfig;
   effectiveSkills: string[];
-  effectivePolicy: typeof DefaultGroupPolicy;
+  effectivePolicy: RuntimePolicy;
 };
 
 export class GroupConfigManager {
@@ -94,9 +81,15 @@ export class GroupConfigManager {
   private withEffectiveProfile(group: z.infer<typeof GroupSchema>): GroupRuntimeConfig {
     const profile = group.profileId ? this.profiles.find((candidate) => candidate.id === group.profileId) : undefined;
     const effectivePolicy = {
-      ...DefaultGroupPolicy,
+      ...DefaultRuntimePolicy,
       ...(profile?.policy ?? {}),
       ...group.policy,
+      requireHumanApprovalFor: [
+        ...new Set([
+          ...(profile?.policy.requireHumanApprovalFor ?? []),
+          ...(group.policy.requireHumanApprovalFor ?? []),
+        ]),
+      ],
     };
     const effectiveSkills = [...new Set([...(profile?.skills ?? []), ...group.skills])];
 
