@@ -78,6 +78,16 @@ export class WorkerPoller {
         createdBy: this.options.role,
       });
 
+      for (const artifact of result.artifacts ?? []) {
+        this.options.store.recordArtifact({
+          id: `ART-${task.id}-${this.options.role}-file-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          taskId: task.id,
+          type: this.options.role === "designer" ? "design_image" : "worker_file",
+          path: artifact,
+          createdBy: this.options.role,
+        });
+      }
+
       this.options.store.updateTaskStatus(task.id, status);
       this.options.store.releaseTaskLease({ taskId: task.id, owner: this.options.owner });
 
@@ -118,11 +128,13 @@ export class WorkerPoller {
 function workerReportPath(taskId: string, role: AgentRole): string {
   if (role === "builder") return `05_BuilderReports/${taskId}-builder-worker.md`;
   if (role === "factory") return `06_FactoryOutputs/${taskId}-factory-worker.md`;
+  if (role === "designer") return `06_DesignerOutputs/${taskId}-designer-worker.md`;
   return `04_Reviews/${taskId}-director-worker.md`;
 }
 
 function modelNameFor(role: AgentRole, config: RuntimeConfig): string {
   if (role === "factory") return config.OLLAMA_MODEL;
   if (role === "builder") return config.CODEX_COMMAND;
+  if (role === "designer") return config.GEMINI_IMAGE_MODEL;
   return config.CLAUDE_CODE_COMMAND;
 }
