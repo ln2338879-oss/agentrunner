@@ -1,6 +1,6 @@
 # Workflow Step Executor
 
-AgentRunner workflows are materialized into executable step records and can now be claimed by worker executors.
+AgentRunner workflows are materialized into executable step records and can now be claimed by worker executors or drained by the workflow step scheduler.
 
 This is the transition point from workflow metadata to real team execution.
 
@@ -32,7 +32,7 @@ Each row stores:
 
 ## Ready-step claim flow
 
-Workers now try to claim ready workflow steps before falling back to the legacy pending-task queue.
+Workers try to claim ready workflow steps before falling back to the legacy pending-task queue.
 
 ```text
 WorkerPoller.pollOnce()
@@ -53,6 +53,47 @@ A workflow step is claimable when:
 4. the step is unlocked or its lease expired
 5. the parent task is still open
 
+## StepScheduler loop
+
+`StepScheduler` runs the same `StepExecutor` path across multiple roles in a cycle.
+
+```text
+StepScheduler.runCycle()
+→ director sweep
+→ builder sweep
+→ factory sweep
+→ designer sweep
+→ director sweep
+→ repeat until idle or max steps reached
+```
+
+The default role order is:
+
+```text
+director → builder → factory → designer → director
+```
+
+The second Director pass lets a single cycle drain flows like:
+
+```text
+plan → build → review
+```
+
+Use the CLI scripts:
+
+```bash
+bun run scheduler
+bun run scheduler:once
+```
+
+Relevant environment variables:
+
+```env
+STEP_SCHEDULER_INTERVAL_MS=5000
+STEP_SCHEDULER_MAX_STEPS_PER_CYCLE=20
+STEP_SCHEDULER_ONCE=false
+```
+
 ## Role mapping
 
 Runtime workers use `AgentRole`, while workflow rows store resolved role ids.
@@ -68,7 +109,7 @@ designer → designer
 
 ## Director step behavior
 
-`StepExecutor` now treats Director-family steps specially:
+`StepExecutor` treats Director-family steps specially:
 
 ```text
 plan      → planning prompt, normal workflow_step_report
@@ -103,7 +144,7 @@ workflow step ledger
 → dependent steps become claimable
 ```
 
-This means isolated workers can now execute a specific ready workflow step instead of only claiming whole pending tasks.
+The scheduler now coordinates this path continuously, so the system can move through ready workflow steps without manually starting one worker poll at a time.
 
 ## Dashboard support
 
@@ -133,24 +174,13 @@ Implemented now:
 6. director planner/reviewer/arbiter step execution
 7. review verdict parsing and task status updates
 8. step report and review artifacts
-9. failed required step marks task failed
+9. scheduler run-cycle and run-loop modes
+10. scheduler CLI scripts
+11. failed required step marks task failed
 
 Still intentionally limited:
 
 1. Human approval gates are not yet first-class workflow steps.
-2. Parallel multi-step execution is now structurally possible but not yet coordinated by a scheduler process.
+2. Parallel multi-step execution is structurally possible, but scheduler execution is still single-process/sequential per cycle.
 3. Retry-with-different-agent still needs policy and provider fallback integration.
 4. Revision loops from independent review steps need a dedicated requeue/revision policy.
-
-## Next phase
-
-The next step is a scheduler loop that continuously claims and dispatches ready steps across roles:
-
-```text
-StepScheduler
-→ scan ready steps
-→ claim by resolved role
-→ dispatch to role agent/provider
-→ wait / poll / notify
-→ advance dependent steps
-```
