@@ -4,6 +4,7 @@ import { Database } from "bun:sqlite";
 import { runtimeSchemaSql } from "./schema";
 import { extendedRuntimeSchemaSql } from "./extended-schema";
 import type { AgentRole, ReviewVerdict, RuntimeTask, TaskStatus, TaskType } from "../runtime/types";
+import type { WorkflowPlan } from "../workflows/types";
 
 export interface TaskSummaryRow {
   id: string;
@@ -13,6 +14,8 @@ export interface TaskSummaryRow {
   assignedTo: string;
   currentRound: number;
   obsidianPath: string;
+  workflowId: string | null;
+  workflowPlanJson: string | null;
   sessionId: string | null;
   lockedBy: string | null;
   lockExpiresAt: string | null;
@@ -71,6 +74,8 @@ export class RuntimeStore {
     this.db.exec(extendedRuntimeSchemaSql);
     this.ensureColumn("tasks", "session_id", "TEXT");
     this.ensureColumn("tasks", "group_id", "TEXT");
+    this.ensureColumn("tasks", "workflow_id", "TEXT");
+    this.ensureColumn("tasks", "workflow_plan_json", "TEXT");
     this.ensureColumn("messages", "session_id", "TEXT");
     this.ensureColumn("attachments", "local_path", "TEXT");
     this.ensureColumn("attachments", "kind", "TEXT");
@@ -84,11 +89,12 @@ export class RuntimeStore {
     obsidianPath: string;
     sessionId?: string;
     groupId?: string;
+    workflowPlan?: WorkflowPlan;
   }): RuntimeTask {
     const now = new Date().toISOString();
     this.db.query(`
-      INSERT INTO tasks (id, title, type, status, assigned_to, obsidian_path, current_round, session_id, group_id, created_at, updated_at)
-      VALUES ($id, $title, $type, 'pending', $assignedTo, $obsidianPath, 0, $sessionId, $groupId, $now, $now)
+      INSERT INTO tasks (id, title, type, status, assigned_to, obsidian_path, current_round, session_id, group_id, workflow_id, workflow_plan_json, created_at, updated_at)
+      VALUES ($id, $title, $type, 'pending', $assignedTo, $obsidianPath, 0, $sessionId, $groupId, $workflowId, $workflowPlanJson, $now, $now)
     `).run({
       $id: input.id,
       $title: input.title,
@@ -97,6 +103,8 @@ export class RuntimeStore {
       $obsidianPath: input.obsidianPath,
       $sessionId: input.sessionId ?? null,
       $groupId: input.groupId ?? null,
+      $workflowId: input.workflowPlan?.workflowId ?? null,
+      $workflowPlanJson: input.workflowPlan ? JSON.stringify(input.workflowPlan) : null,
       $now: now,
     });
 
@@ -135,6 +143,8 @@ export class RuntimeStore {
         assigned_to as assignedTo,
         current_round as currentRound,
         obsidian_path as obsidianPath,
+        workflow_id as workflowId,
+        workflow_plan_json as workflowPlanJson,
         session_id as sessionId,
         locked_by as lockedBy,
         lock_expires_at as lockExpiresAt,
@@ -155,6 +165,8 @@ export class RuntimeStore {
         assigned_to as assignedTo,
         current_round as currentRound,
         obsidian_path as obsidianPath,
+        workflow_id as workflowId,
+        workflow_plan_json as workflowPlanJson,
         session_id as sessionId,
         locked_by as lockedBy,
         lock_expires_at as lockExpiresAt,

@@ -7,16 +7,21 @@ import type { GroupConfigManager } from "../groups/group-config";
 import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
 import { runDirectorReview } from "../review/review-loop";
+import { RoleRegistry } from "../roles/registry";
 import { classifyTask } from "../router/classify";
+import { planWorkflowForTask } from "../router/workflow-routing";
 import { loadSkillContext } from "../skills/context";
 import { runShellCommand } from "../utils/command";
 import { appendVisionAnalysis } from "../vision/adapter";
+import { WorkflowRegistry } from "../workflows/engine";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./types";
 
 export class Orchestrator {
   private readonly agents = new Map<AgentRole, AgentAdapter>();
   private notifier: RuntimeNotifier = new NullNotifier();
   private groupConfig: GroupConfigManager | null = null;
+  private roleRegistry = new RoleRegistry();
+  private workflowRegistry = new WorkflowRegistry([], this.roleRegistry);
 
   constructor(
     private readonly store: RuntimeStore,
@@ -38,6 +43,11 @@ export class Orchestrator {
 
   async initialize(): Promise<void> {
     await this.groupConfig?.load();
+    this.roleRegistry = await RoleRegistry.load({ path: this.config.ROLES_CONFIG_PATH });
+    this.workflowRegistry = await WorkflowRegistry.load({
+      path: this.config.WORKFLOWS_CONFIG_PATH,
+      roleRegistry: this.roleRegistry,
+    });
     await this.vault.ensureDefaultFolders();
 
     if (this.config.RECOVER_STALE_TASKS_ON_START) {
@@ -98,6 +108,10 @@ export class Orchestrator {
     });
 
     const classified = classifyTask(input.content);
+    const workflowPlan = planWorkflowForTask({
+      classified,
+      workflowRegistry: this.workflowRegistry,
+    });
     const taskId = `TASK-${Date.now()}`;
     const title = input.content.slice(0, 60).replace(/\s+/g, " ") || "Untitled task";
     const obsidianPath = `01_Tasks/${taskId}.md`;
@@ -122,6 +136,7 @@ export class Orchestrator {
       assignedTo: classified.assignedTo,
       obsidianPath,
       groupId: group?.id,
+      workflowPlan,
     });
 
     const leaseAcquired = this.store.acquireTaskLease({
@@ -156,6 +171,7 @@ export class Orchestrator {
           request: effectiveContent,
           discordMessageId: input.discordMessageId,
           discordChannelId: input.discordChannelId,
+          workflowPlan,
         }),
       );
 
