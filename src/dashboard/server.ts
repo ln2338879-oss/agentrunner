@@ -16,7 +16,7 @@ export function startDashboardServer(input: {
   console.log(`[dashboard] listening on http://${server.hostname}:${server.port}`);
 }
 
-function handleDashboardRequest(request: Request, store: RuntimeStore): Response {
+export function handleDashboardRequest(request: Request, store: RuntimeStore): Response {
   const url = new URL(request.url);
 
   if (url.pathname === "/health") {
