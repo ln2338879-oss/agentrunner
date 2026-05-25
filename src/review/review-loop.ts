@@ -4,7 +4,7 @@ import { reviewNote } from "../obsidian/templates";
 import type { VaultManager } from "../obsidian/vault-manager";
 import { parseReviewVerdict } from "./verdict";
 import { buildDirectorReviewPrompt } from "../utils/prompt";
-import type { AgentAdapter, AgentRole, ReviewVerdict } from "../runtime/types";
+import type { AgentAdapter, AgentRole, ReviewVerdict, TaskStatus } from "../runtime/types";
 
 export async function runDirectorReview(input: {
   taskId: string;
@@ -72,8 +72,15 @@ export async function runDirectorReview(input: {
   return { verdict, path, output };
 }
 
-export function statusFromVerdict(verdict: ReviewVerdict): "approved" | "needs_revision" | "blocked" {
+export function statusFromVerdict(verdict: ReviewVerdict): TaskStatus {
   if (verdict === "APPROVED") return "approved";
   if (verdict === "NEEDS_REVISION") return "needs_revision";
+  if (verdict === "NEEDS_HUMAN") return "needs_human";
+  if (verdict === "SPLIT_TASK") return "split_task";
+  if (verdict === "RETRY_WITH_DIFFERENT_AGENT") return "retry_with_different_agent";
   return "blocked";
+}
+
+export function isTerminalReviewVerdict(verdict: ReviewVerdict): boolean {
+  return verdict !== "NEEDS_REVISION";
 }

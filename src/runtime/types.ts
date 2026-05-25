@@ -8,12 +8,21 @@ export type TaskStatus =
   | "pending"
   | "running"
   | "needs_revision"
+  | "needs_human"
+  | "split_task"
+  | "retry_with_different_agent"
   | "completed"
   | "approved"
   | "blocked"
   | "failed";
 
-export type ReviewVerdict = "APPROVED" | "NEEDS_REVISION" | "BLOCKED";
+export type ReviewVerdict =
+  | "APPROVED"
+  | "NEEDS_REVISION"
+  | "BLOCKED"
+  | "NEEDS_HUMAN"
+  | "SPLIT_TASK"
+  | "RETRY_WITH_DIFFERENT_AGENT";
 
 export interface RuntimeTask {
   id: string;
