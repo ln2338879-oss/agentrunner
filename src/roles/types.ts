@@ -23,6 +23,16 @@ export const RoleCapabilitySchema = z.enum([
   "write-files",
 ]);
 
+export const DefaultRolePermissions = {
+  canWriteFiles: false,
+  canRunCommands: false,
+  canRunTests: false,
+  canReview: false,
+  canArbitrate: false,
+  canCreateTasks: false,
+  requiresReview: true,
+};
+
 export const RolePermissionSchema = z.object({
   canWriteFiles: z.boolean().default(false),
   canRunCommands: z.boolean().default(false),
@@ -42,7 +52,7 @@ export const RoleDefinitionSchema = z.object({
   command: z.string().optional(),
   fallbackCommands: z.array(z.string()).default([]),
   capabilities: z.array(RoleCapabilitySchema).default([]),
-  permissions: RolePermissionSchema.default({}),
+  permissions: RolePermissionSchema.default(DefaultRolePermissions),
   timeoutMs: z.number().int().positive().optional(),
   systemPrompt: z.string().optional(),
 });
