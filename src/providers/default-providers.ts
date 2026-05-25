@@ -1,4 +1,5 @@
 import { BuilderAgent } from "../agents/builder";
+import { DesignerAgent } from "../agents/designer";
 import { DirectorAgent } from "../agents/director";
 import { FactoryAgent } from "../agents/factory";
 import type { AgentAdapter, AgentRole } from "../runtime/types";
@@ -63,8 +64,35 @@ export const OllamaProviderFactory: AgentProviderFactory = {
   },
 };
 
+export const NanoBananaProviderFactory: AgentProviderFactory = {
+  id: "nanobanana",
+  kind: "nanobanana",
+  createAgent(input: AgentProviderFactoryInput): AgentAdapter {
+    assertRole(input, "designer");
+    return new DesignerAgent(input.config);
+  },
+  async healthCheck(config): Promise<ProviderHealth> {
+    return {
+      id: "nanobanana",
+      kind: "nanobanana",
+      ok: Boolean(config.GEMINI_API_KEY && config.GEMINI_IMAGE_MODEL),
+      detail: config.GEMINI_API_KEY
+        ? `Image model configured: ${config.GEMINI_IMAGE_MODEL}`
+        : "GEMINI_API_KEY is not configured.",
+    };
+  },
+};
+
+export const GeminiImageProviderFactory: AgentProviderFactory = {
+  ...NanoBananaProviderFactory,
+  id: "gemini-image",
+  kind: "gemini-image",
+};
+
 export const DefaultProviderFactories: AgentProviderFactory[] = [
   ClaudeCodeProviderFactory,
   CodexProviderFactory,
   OllamaProviderFactory,
+  NanoBananaProviderFactory,
+  GeminiImageProviderFactory,
 ];
