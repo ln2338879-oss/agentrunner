@@ -1,4 +1,5 @@
 import type { AgentRole, TaskType } from "../runtime/types";
+import type { WorkflowPlan } from "../workflows/types";
 
 export function taskNote(input: {
   id: string;
@@ -8,14 +9,30 @@ export function taskNote(input: {
   request: string;
   discordMessageId?: string;
   discordChannelId?: string;
+  workflowPlan?: WorkflowPlan;
 }): string {
+  const workflowSection = input.workflowPlan
+    ? [
+        "# Workflow Plan",
+        "",
+        `Workflow: ${input.workflowPlan.workflowId}${input.workflowPlan.label ? ` (${input.workflowPlan.label})` : ""}`,
+        "",
+        "| Step | Role | Resolved Role | Action | Depends On | Review Required |",
+        "|---|---|---|---|---|---|",
+        ...input.workflowPlan.steps.map((step) => (
+          `| ${step.id} | ${step.role} | ${step.resolvedRoleId} | ${step.action} | ${step.dependsOn.join(", ") || "-"} | ${step.requiresReview ? "yes" : "no"} |`
+        )),
+        "",
+      ].join("\n")
+    : "";
+
   return `---
 id: ${input.id}
 title: ${JSON.stringify(input.title)}
 type: ${input.type}
 status: pending
 assigned_to: ${input.assignedTo}
-created_by: director
+${input.workflowPlan ? `workflow_id: ${input.workflowPlan.workflowId}\n` : ""}created_by: director
 review_required: true
 ${input.discordMessageId ? `discord_message_id: ${input.discordMessageId}\n` : ""}${input.discordChannelId ? `discord_channel_id: ${input.discordChannelId}\n` : ""}---
 
@@ -23,7 +40,7 @@ ${input.discordMessageId ? `discord_message_id: ${input.discordMessageId}\n` : "
 
 ${input.request}
 
-# 작업 지시
+${workflowSection}# 작업 지시
 
 Director가 이 요청을 분석하고 Builder 또는 Factory에게 전달합니다.
 
