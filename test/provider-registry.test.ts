@@ -4,6 +4,7 @@ import { ProviderRegistry } from "../src/providers/registry";
 import type { AgentProviderFactory } from "../src/providers/types";
 import type { AgentRunInput, AgentRunResult } from "../src/runtime/types";
 import { RoleRegistry } from "../src/roles/registry";
+import type { RoleDefinition } from "../src/roles/types";
 
 const config = loadConfig({
   CLAUDE_CODE_COMMAND: "claude",
@@ -11,6 +12,20 @@ const config = loadConfig({
   OLLAMA_BASE_URL: "http://localhost:11434/v1",
   OLLAMA_MODEL: "gemma",
 });
+
+const baseRoleDefinition = {
+  fallbackCommands: [],
+  capabilities: [],
+  permissions: {
+    canWriteFiles: false,
+    canRunCommands: false,
+    canRunTests: false,
+    canReview: false,
+    canArbitrate: false,
+    canCreateTasks: false,
+    requiresReview: true,
+  },
+};
 
 describe("ProviderRegistry", () => {
   test("creates default legacy role agents", () => {
@@ -21,26 +36,27 @@ describe("ProviderRegistry", () => {
   });
 
   test("uses role registry provider definitions when resolving role providers", () => {
-    const roleRegistry = new RoleRegistry({
-      roles: [
-        {
-          id: "planner",
-          legacyRole: "director",
-          provider: "claude-code",
-        },
-        {
-          id: "builder",
-          legacyRole: "builder",
-          provider: "codex",
-        },
-        {
-          id: "generator",
-          legacyRole: "factory",
-          provider: "ollama",
-        },
-      ],
-      aliases: {},
-    });
+    const roles: RoleDefinition[] = [
+      {
+        ...baseRoleDefinition,
+        id: "planner",
+        legacyRole: "director",
+        provider: "claude-code",
+      },
+      {
+        ...baseRoleDefinition,
+        id: "builder",
+        legacyRole: "builder",
+        provider: "codex",
+      },
+      {
+        ...baseRoleDefinition,
+        id: "generator",
+        legacyRole: "factory",
+        provider: "ollama",
+      },
+    ];
+    const roleRegistry = new RoleRegistry({ roles, aliases: {} });
 
     const registry = new ProviderRegistry();
     expect(registry.createAgentForRole({ role: "director", config, roleRegistry }).role).toBe("director");
