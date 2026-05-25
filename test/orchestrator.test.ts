@@ -29,7 +29,7 @@ async function createFixture() {
     PROJECT_ROOT: path.join(dir, "project"),
     OBSIDIAN_VAULT_PATH: path.join(dir, "vault"),
     DATABASE_PATH: path.join(dir, "runtime.sqlite"),
-    RECOVER_STALE_TASKS_ON_START: false,
+    RECOVER_STALE_TASKS_ON_START: "false",
   });
 
   return {
