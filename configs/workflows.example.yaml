@@ -61,6 +61,26 @@ workflows:
         dependsOn:
           - generate
 
+  - id: plan-design-review
+    label: Plan, Design, Review
+    description: Visual design and image generation workflow.
+    defaultForTaskTypes:
+      - design
+    steps:
+      - id: plan
+        role: planner
+        action: plan
+      - id: design
+        role: designer
+        action: generate-image
+        dependsOn:
+          - plan
+      - id: review
+        role: reviewer
+        action: review
+        dependsOn:
+          - design
+
   - id: research-report
     label: Research Report
     description: Generic research workflow.
