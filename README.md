@@ -1,53 +1,76 @@
 # AgentRunner
 
-Discord로 게임 개발을 지시하고, AI 에이전트가 기획·구현·콘텐츠 생성·리뷰를 나눠 처리하는 3봇 게임 개발 런타임입니다.
+AgentRunner는 Discord에서 요청을 받아 여러 AI 역할이 계획, 실행, 검토, 디자인 생성을 나눠 처리하는 **범용 멀티 에이전트 팀 런타임**입니다.
 
-AgentRunner는 EJClaw의 멀티 에이전트 운영 패턴을 참고하되, 범용 코드 자동화가 아니라 **게임 개발 파이프라인**에 맞춰 설계되었습니다.
+초기에는 게임 개발 자동화를 목표로 시작했지만, 현재 구조는 게임 전용이 아니라 개발, 문서/콘텐츠 생성, 디자인/이미지 생성, 리뷰, 중재, 운영 자동화까지 확장 가능한 범용 workflow runtime입니다.
 
 ## 현재 상태
 
-AgentRunner는 현재 **설치해서 테스트 사용 가능한 MVP** 단계입니다.
+AgentRunner는 이제 단순 MVP를 넘어 **기능형 베타 / 준프로덕션 런타임** 단계입니다.
 
-코드 레벨에서는 Discord 봇, SQLite 상태관리, Obsidian 기록, ClaudeCode/Codex/Ollama 어댑터, 리뷰 루프, 첨부파일 저장, vision/browser command, dashboard, doctor, failover, worker entrypoint, systemd/PM2 템플릿, GitHub Actions 품질 게이트가 구현되어 있습니다.
+구현된 핵심은 다음과 같습니다.
 
-아직 부족한 것은 “장기 운영 증거”입니다. 실제 VPS나 로컬 서버에서 `bun run doctor → bun run start → Discord 작업 생성 → Obsidian 결과 확인`까지 실행한 runtime proof를 추가로 남겨야 프로덕션 신뢰도가 올라갑니다.
+```text
+Discord Director Bot
+→ task classification
+→ role registry
+→ workflow registry
+→ provider registry
+→ policy engine
+→ SQLite runtime state
+→ Obsidian artifact vault
+→ workflow step ledger
+→ ready-step claim
+→ StepExecutor
+→ StepScheduler loop
+→ Director review / arbitration
+→ dashboard visibility
+```
+
+아직 완전한 프로덕션 플랫폼은 아닙니다. 남은 핵심은 human gate의 workflow step 정식 편입, revision requeue policy, provider retry/fallback 고도화, parallel DAG execution, dashboard control API입니다.
 
 ## 역할 구조
 
 | 역할 | 기본 도구 | 목적 |
 |---|---|---|
-| Director | ClaudeCode | 기획, 분해, 리뷰 |
-| Builder | Codex | 구현, 수정, 테스트 |
-| Factory | Ollama/Gemma | 콘텐츠 대량 생성 |
+| Director | ClaudeCode | 계획, 리뷰, 중재, verdict 판단 |
+| Builder | Codex | 코드 구현, 수정, 테스트 |
+| Factory | Ollama/Gemma | 문서, 데이터, 콘텐츠 생성 |
+| Designer | Gemini image / Nano Banana 계열 | 이미지, 디자인, 시각 자료 생성 |
 
 ```text
 Discord User
   ↓
 Director Bot
   ↓
-AgentRunner Orchestrator
+AgentRunner Runtime
   ├─ SQLite Runtime DB
   ├─ Obsidian Vault
+  ├─ Role Registry
+  ├─ Workflow Registry
+  ├─ Provider Registry
+  ├─ Policy Engine
+  ├─ StepScheduler
+  ├─ Director / Planner / Reviewer / Arbiter
   ├─ Builder / Codex
   ├─ Factory / Ollama
-  ├─ Vision Command
-  ├─ Browser Command
-  └─ Director Review Loop
+  └─ Designer / Gemini Image
   ↓
-Discord Result + Obsidian Notes
+Discord Result + Obsidian Artifacts + Dashboard
 ```
 
 ## 구현된 기능
 
 ### Discord Runtime
 
-- Director / Builder / Factory 3봇 구조
+- Director / Builder / Factory / Designer worker 구조
 - Discord text commands
 - Discord slash commands
 - Discord 첨부파일 저장
 - Discord 채널별 notification
-- `!steer` 기반 mid-turn steering 기초
+- `!steer` 기반 mid-turn steering
 - 채널별 session context 주입
+- 디자인 요청 중 사용자의 의견/선택/취향 판단이 필요한 경우 작성자 Discord mention 후 진행 보류
 
 ### 작업 관리
 
@@ -56,26 +79,73 @@ Discord Result + Obsidian Notes
 - sessions / attachments / steering 확장 스키마
 - task lease
 - stale task recovery
-- NEEDS_REVISION 자동 재작업 루프
 - Director verdict 기반 승인/차단
+- NEEDS_REVISION revision loop
+- workflow step ledger
+- workflow step lease
+- ready-step dependency gating
+- step-level outputRef / error / timestamps
 
-### 게임 개발 워크플로우
+### Workflow Engine
 
-- Obsidian Vault 자동 생성
-- 작업 노트 생성
-- Builder report 생성
-- Factory output 생성
-- Director review 생성
-- Approved summary 생성
-- Dataview dashboard 템플릿
-- group/channel별 프로젝트 설정
-- skill context 자동 주입
+- role registry
+- workflow registry
+- provider registry
+- workflow routing metadata
+- workspace/profile config
+- policy engine
+- workflow step execution ledger
+- ready step claim
+- StepExecutor
+- StepScheduler loop
+- Director planner/reviewer/arbiter step 독립 실행
+- Builder / Factory / Designer step 독립 실행
 
-### AI Adapter
+기본 flow 예시:
+
+```text
+planner → builder/factory/designer → reviewer → optional arbiter
+```
+
+Scheduler 기본 sweep:
+
+```text
+director → builder → factory → designer → director
+```
+
+이 순서 덕분에 단일 cycle에서 다음 흐름을 처리할 수 있습니다.
+
+```text
+plan → build/design/generate → review
+```
+
+### Designer / Gemini Image
+
+- Designer role 추가
+- Gemini image provider 연결
+- `GEMINI_API_KEY`
+- `GEMINI_IMAGE_MODEL`
+- Discord 첨부 이미지 `local_path` 추출
+- Gemini `inlineData` 참조 이미지 전달
+- 생성 이미지 artifact 저장
+- `design_image` artifact 기록
+- 디자인 요청 중 주관적 선택/취향 판단이 필요한 경우 작업 생성 전에 작성자 mention
+
+예시:
+
+```text
+픽셀아트 아이콘 만들어줘                → 자동 진행
+첨부 이미지 스타일로 캐릭터 만들어줘     → 자동 진행
+로고 시안 중 하나 골라줘                 → 작성자 mention 후 방향 확정 요청
+어떤 게 더 좋아?                         → 작성자 mention 후 방향 확정 요청
+```
+
+### AI Adapter / Provider
 
 - ClaudeCode CLI adapter
 - Codex CLI adapter
 - Ollama OpenAI-compatible adapter
+- Gemini image provider
 - Factory endpoint/model failover
 - CLI command failover
 - Claude/Codex profile 후보 로테이션
@@ -84,26 +154,42 @@ Discord Result + Obsidian Notes
 
 - Discord 첨부파일 로컬 저장
 - 이미지 `local_path` 프롬프트 주입
+- DesignerAgent 참조 이미지 처리
 - `VISION_COMMAND` 기반 이미지 분석
 - OpenAI vision 예시 스크립트
 - Gemini vision 예시 스크립트
 - `BROWSER_COMMAND` 기반 URL context 주입
 - `scripts/browser-fetch.ts` 기본 예시
 
+### Dashboard
+
+- runtime status dashboard
+- task list
+- task detail JSON
+- task timeline
+- workflow step status count
+- workflow step timeline event
+- artifacts / reviews / runs 조회
+
 ### 운영 / 배포
 
+- `bun run setup`
+- `bun run setup:check`
+- `bun run setup:local`
+- `bun run setup:ubuntu`
+- `bun run setup:systemd`
+- `bun run setup:vps`
 - `bun run doctor`
 - `bun run proof`
 - `bun run dashboard`
 - `bun run worker`
-- `scripts/setup-local.sh`
-- `scripts/setup-ubuntu.sh`
+- `bun run scheduler`
+- `bun run scheduler:once`
 - systemd service template
 - worker systemd template
 - PM2 ecosystem template
 - GitHub Actions quality gate
-- approved task PR workflow
-- CHANGELOG
+- runtime proof workflow
 
 ## 빠른 시작
 
@@ -120,19 +206,16 @@ cp .env.example .env
 bun run proof
 ```
 
-또는 setup script를 사용할 수 있습니다.
+setup runner를 사용할 수도 있습니다.
 
 ```bash
-bash scripts/setup-local.sh
+bun run setup
+bun run setup:check
+bun run setup:local
+bun run setup:ubuntu
+bun run setup:systemd
+bun run setup:vps
 ```
-
-Ubuntu 서버에서는 다음을 사용할 수 있습니다.
-
-```bash
-bash scripts/setup-ubuntu.sh
-```
-
-자세한 설치와 runtime proof 절차는 `docs/setup-and-proof.md`를 참고하세요.
 
 `.env`에 최소값을 설정합니다.
 
@@ -151,22 +234,30 @@ OLLAMA_BASE_URL=http://localhost:11434/v1
 OLLAMA_MODEL=gemma
 ```
 
-서버 상태를 먼저 확인합니다.
+Designer / Gemini image generation을 사용하려면 다음을 추가합니다.
+
+```env
+GEMINI_API_KEY=PASTE_GEMINI_API_KEY_HERE
+GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview
+DESIGNER_OUTPUT_DIR=./vault/AgentRunnerVault/06_DesignerOutputs
+```
+
+서버 상태를 확인합니다.
 
 ```bash
 bun run doctor
-```
-
-개발 모드 실행:
-
-```bash
-bun run dev
 ```
 
 일반 실행:
 
 ```bash
 bun run start
+```
+
+개발 모드:
+
+```bash
+bun run dev
 ```
 
 ## 실행 명령어
@@ -176,7 +267,9 @@ bun run start          # Discord AgentRunner runtime
 bun run dashboard      # Standalone dashboard server
 bun run doctor         # Runtime environment check
 bun run proof          # Local runtime proof generator
-bun run worker         # Isolated queue-polling worker
+bun run worker         # Isolated role worker
+bun run scheduler      # Continuous workflow step scheduler
+bun run scheduler:once # Run one scheduler cycle
 bun run quality:check  # typecheck + lint + format check + test
 bun run build          # TypeScript build
 ```
@@ -200,7 +293,7 @@ Slash command:
 /tasks
 /task id:TASK-...
 /retry id:TASK-...
-/run prompt:초반 몬스터 20종 JSON으로 만들어줘
+/run prompt:작업 요청
 ```
 
 일반 메시지는 새 작업으로 생성됩니다.
@@ -217,17 +310,41 @@ REGISTER_SLASH_COMMANDS=true
 
 `DISCORD_GUILD_ID`를 비워두면 global command로 등록됩니다. 개발 중에는 guild command가 반영이 빠릅니다.
 
-## Builder / Factory 봇
+## Worker Bots
 
-Builder와 Factory 봇까지 로그인하려면 다음 값을 추가합니다.
+Builder, Factory, Designer worker bot까지 로그인하려면 다음 값을 추가합니다.
 
 ```env
 BUILDER_DISCORD_TOKEN=
 FACTORY_DISCORD_TOKEN=
+DESIGNER_DISCORD_TOKEN=
 DEV_TASKS_CHANNEL_ID=
 CONTENT_FACTORY_CHANNEL_ID=
+DESIGN_TASKS_CHANNEL_ID=
 REVIEW_LOG_CHANNEL_ID=
 BUILD_LOG_CHANNEL_ID=
+```
+
+## StepScheduler
+
+StepScheduler는 ready workflow step을 계속 찾아 실행합니다.
+
+```bash
+bun run scheduler
+```
+
+1회 cycle만 실행하려면:
+
+```bash
+bun run scheduler:once
+```
+
+환경 변수:
+
+```env
+STEP_SCHEDULER_INTERVAL_MS=5000
+STEP_SCHEDULER_MAX_STEPS_PER_CYCLE=20
+STEP_SCHEDULER_ONCE=false
 ```
 
 ## Group / Skill 설정
@@ -242,23 +359,26 @@ cp configs/groups.example.yaml configs/groups.yaml
 
 ```yaml
 groups:
-  - id: runebound-dev
-    name: Runebound Development
+  - id: default-workspace
+    name: Default Workspace
     discordChannelIds:
       - "000000000000000000"
-    projectRoot: /opt/game-projects/runebound
+    projectRoot: /opt/projects/default
     obsidianVaultPath: /opt/obsidian-vaults/AgentRunnerVault
     factoryModel: gemma
     allowedRoles:
       - director
       - builder
       - factory
+      - designer
+    defaultWorkflow: plan-build-review
     skills:
-      - runebound-design
-      - item-schema
+      - default
+      - code-style
     policy:
       allowCodeChanges: true
       allowContentGeneration: true
+      allowImageGeneration: true
       requireDirectorReview: true
 ```
 
@@ -266,11 +386,11 @@ groups:
 
 ```text
 skills/default.md
-skills/item-schema.md
 skills/code-style.md
+skills/item-schema.md
 ```
 
-## 첨부파일 / Vision
+## 첨부파일 / Vision / Designer reference images
 
 Discord 메시지에 파일이나 이미지를 첨부하면 AgentRunner가 파일을 저장하고 프롬프트에 정보를 추가합니다.
 
@@ -290,7 +410,9 @@ skipped_reason
 ATTACHMENTS_DIR/<discord-message-id>/
 ```
 
-Vision command를 설정하면 이미지 `local_path`가 있는 작업에서 이미지 분석 결과가 `# Vision Analysis`로 프롬프트에 추가됩니다.
+DesignerAgent는 이미지 첨부의 `local_path`를 찾아 Gemini 요청에 참조 이미지로 전달합니다.
+
+Vision command를 설정하면 이미지 분석 결과가 `# Vision Analysis`로 프롬프트에 추가됩니다.
 
 OpenAI 예시:
 
@@ -316,8 +438,6 @@ GEMINI_VISION_MODEL=gemini-2.5-flash
 BROWSER_COMMAND=bun scripts/browser-fetch.ts
 BROWSER_COMMAND_TIMEOUT_MS=300000
 ```
-
-`scripts/browser-fetch.ts`는 기본 fetch 기반 예시입니다. Chromium screenshot, 로그인 흐름, 동적 페이지가 필요하면 Playwright 기반 command로 교체할 수 있습니다.
 
 ## Failover / Profile Rotation
 
@@ -365,19 +485,22 @@ DASHBOARD_PORT=8787
 
 ```text
 GET /health
+GET /api/status
 GET /api/tasks
 GET /api/tasks/:taskId
+GET /api/tasks/:taskId/timeline
 GET /
 ```
 
 ## Worker Process Isolation
 
-역할별 worker entrypoint가 있습니다. 이제 worker는 SQLite queue에서 자기 역할의 pending task를 claim해서 실행합니다.
+역할별 worker entrypoint가 있습니다. worker는 먼저 ready workflow step을 claim하고, 없으면 legacy pending task queue로 fallback합니다.
 
 ```bash
 AGENTRUNNER_WORKER_ROLE=director bun run worker
 AGENTRUNNER_WORKER_ROLE=builder bun run worker
 AGENTRUNNER_WORKER_ROLE=factory bun run worker
+AGENTRUNNER_WORKER_ROLE=designer bun run worker
 ```
 
 1회 검증:
@@ -392,14 +515,6 @@ systemd template:
 deploy/systemd/agentrunner-worker@.service
 ```
 
-예시:
-
-```bash
-sudo systemctl enable --now agentrunner-worker@director
-sudo systemctl enable --now agentrunner-worker@builder
-sudo systemctl enable --now agentrunner-worker@factory
-```
-
 ## Obsidian Vault 구조
 
 AgentRunner는 Obsidian 앱을 직접 제어하지 않습니다. Vault 폴더에 Markdown 파일을 생성합니다.
@@ -410,30 +525,30 @@ AgentRunnerVault/
   01_Tasks/
   02_GameDesign/
   03_Content/
-    items/
-    monsters/
-    npcs/
-    quests/
   04_Reviews/
   05_BuilderReports/
   06_FactoryOutputs/
+  06_DesignerOutputs/
   07_Approved/
   08_Recovery/
   90_Prompts/
   99_System/
 ```
 
-## 리뷰 루프
+## Review Verdicts
 
-Director는 Builder 또는 Factory 결과를 검토하고 다음 verdict 중 하나를 반환해야 합니다.
+Director review / arbitration step은 다음 verdict 중 하나를 반환해야 합니다.
 
 ```text
 VERDICT: APPROVED
 VERDICT: NEEDS_REVISION
 VERDICT: BLOCKED
+VERDICT: NEEDS_HUMAN
+VERDICT: SPLIT_TASK
+VERDICT: RETRY_WITH_DIFFERENT_AGENT
 ```
 
-`NEEDS_REVISION`이면 Orchestrator가 Director 피드백을 포함한 수정 프롬프트를 만들고 같은 worker를 다시 실행합니다. 이 과정은 `MAX_REVIEW_ROUNDS`까지 반복됩니다.
+`NEEDS_REVISION`이면 기존 Orchestrator loop에서는 Director 피드백을 포함한 수정 프롬프트를 만들고 같은 worker를 다시 실행합니다. 독립 StepScheduler 경로에서는 revision requeue policy가 후속 작업으로 남아 있습니다.
 
 ## Approved Task PR Workflow
 
@@ -472,6 +587,8 @@ docs/operations-hardening.md
 docs/doctor-and-vision.md
 docs/advanced-runtime.md
 docs/setup-and-proof.md
+docs/workflow-step-executor.md
+docs/designer-gemini.md
 ```
 
 ## 품질 게이트
@@ -494,6 +611,8 @@ bun run build
 ```
 
 GitHub Actions의 `AgentRunner Quality Gate` workflow는 PR과 main push마다 install, typecheck, lint, format check, test, build를 실행합니다.
+
+`AgentRunner Runtime Proof` workflow는 내부 런타임 proof를 검증합니다.
 
 ## Runtime Proof 만들기
 
@@ -526,7 +645,7 @@ bun run start
 Discord에서 테스트 작업을 생성합니다.
 
 ```text
-/run prompt: 테스트용 포션 아이템 5개를 JSON으로 만들고 Director가 리뷰해줘
+/run prompt: 테스트용 콘텐츠를 만들고 Director가 리뷰해줘
 ```
 
 성공 기준:
@@ -534,7 +653,8 @@ Discord에서 테스트 작업을 생성합니다.
 ```text
 Discord 봇 로그인 성공
 Task 생성 성공
-Worker 실행 성공
+Workflow step 생성
+Worker 또는 scheduler 실행 성공
 Director review 생성
 Obsidian Vault에 결과 파일 생성
 Discord 응답 반환
@@ -544,7 +664,10 @@ Discord 응답 반환
 
 ## 현재 한계
 
-- 실제 장기 운영 로그는 아직 별도로 남겨야 합니다.
+- human gate는 아직 workflow step으로 정식 편입되지 않았습니다.
+- StepScheduler는 single-process sequential scheduler입니다. parallel DAG execution은 후속 작업입니다.
+- 독립 StepScheduler 경로의 revision requeue policy는 후속 작업입니다.
+- retry with different provider/agent 정책은 더 고도화가 필요합니다.
 - browser command는 기본 fetch 예시이며 headless Chromium daemon은 아닙니다.
 - voice transcription은 아직 구현되지 않았습니다.
 - LICENSE 파일은 별도로 추가해야 합니다.
