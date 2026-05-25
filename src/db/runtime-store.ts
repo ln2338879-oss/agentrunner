@@ -166,6 +166,62 @@ export class RuntimeStore {
     `).all({ $limit: limit }) as TaskSummaryRow[];
   }
 
+  claimPendingTask(input: {
+    role: AgentRole;
+    owner: string;
+    ttlMinutes: number;
+  }): TaskSummaryRow | null {
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const expiresAt = new Date(now.getTime() + input.ttlMinutes * 60_000).toISOString();
+
+    const candidate = this.db.query(`
+      SELECT id
+      FROM tasks
+      WHERE status = 'pending'
+        AND assigned_to = $role
+        AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso)
+      ORDER BY created_at ASC
+      LIMIT 1
+    `).get({
+      $role: input.role,
+      $nowIso: nowIso,
+    }) as { id: string } | null;
+
+    if (!candidate) return null;
+
+    const result = this.db.query(`
+      UPDATE tasks
+      SET status = 'running', locked_by = $owner, lock_expires_at = $expiresAt, updated_at = $nowIso
+      WHERE id = $taskId
+        AND status = 'pending'
+        AND assigned_to = $role
+        AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso)
+    `).run({
+      $taskId: candidate.id,
+      $role: input.role,
+      $owner: input.owner,
+      $expiresAt: expiresAt,
+      $nowIso: nowIso,
+    });
+
+    if (result.changes === 0) return null;
+    return this.getTask(candidate.id);
+  }
+
+  getTaskPrompt(taskId: string): string {
+    const message = this.db.query(`
+      SELECT content
+      FROM messages
+      WHERE task_id = $taskId
+      ORDER BY created_at ASC
+      LIMIT 1
+    `).get({ $taskId: taskId }) as { content: string } | null;
+
+    if (message?.content) return message.content;
+    return this.getTask(taskId)?.title ?? "";
+  }
+
   getOrCreateSession(input: {
     discordChannelId: string;
     title: string;
