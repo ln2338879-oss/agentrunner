@@ -1,4 +1,4 @@
-import type { AgentRole, TaskType } from "../runtime/types";
+import type { AgentRole, ReviewVerdict, TaskType } from "../runtime/types";
 import type { WorkflowPlan } from "../workflows/types";
 
 export function taskNote(input: {
@@ -54,7 +54,7 @@ Director가 이 요청을 분석하고 Builder 또는 Factory에게 전달합니
 
 export function reviewNote(input: {
   taskId: string;
-  verdict: "APPROVED" | "NEEDS_REVISION" | "BLOCKED";
+  verdict: ReviewVerdict;
   round: number;
   body: string;
 }): string {
