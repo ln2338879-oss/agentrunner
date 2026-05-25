@@ -62,6 +62,9 @@ const ConfigSchema = z.object({
   AGENTRUNNER_WORKER_ROLE: OptionalWorkerRoleSchema,
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   WORKER_POLL_ONCE: z.coerce.boolean().default(false),
+  STEP_SCHEDULER_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  STEP_SCHEDULER_MAX_STEPS_PER_CYCLE: z.coerce.number().int().positive().default(20),
+  STEP_SCHEDULER_ONCE: z.coerce.boolean().default(false),
 });
 
 export type RuntimeConfig = z.infer<typeof ConfigSchema>;

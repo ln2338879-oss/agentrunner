@@ -12,6 +12,8 @@
     "doctor": "bun src/doctor.ts",
     "proof": "bun src/proof.ts",
     "worker": "bun src/worker/index.ts",
+    "scheduler": "bun src/scheduler/index.ts",
+    "scheduler:once": "STEP_SCHEDULER_ONCE=true bun src/scheduler/index.ts",
     "setup": "bun src/setup/index.ts",
     "setup:check": "bun src/setup/index.ts --check",
     "setup:local": "bun src/setup/index.ts --local",
