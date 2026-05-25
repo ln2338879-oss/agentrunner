@@ -27,7 +27,7 @@ export class StepExecutor {
 
   async runOnce(): Promise<StepExecutorResult> {
     const step = this.options.store.claimReadyWorkflowStep({
-      role: claimRoleForAgentRole(this.options.role),
+      roleId: claimRoleIdForAgentRole(this.options.role),
       owner: this.options.owner,
       ttlMinutes: this.options.config.TASK_LEASE_MINUTES,
     });
@@ -219,9 +219,9 @@ export class StepExecutor {
   }
 }
 
-function claimRoleForAgentRole(role: AgentRole): AgentRole {
-  if (role === "factory") return "generator" as AgentRole;
-  if (role === "director") return "planner" as AgentRole;
+export function claimRoleIdForAgentRole(role: AgentRole): string {
+  if (role === "factory") return "generator";
+  if (role === "director") return "planner";
   return role;
 }
 
