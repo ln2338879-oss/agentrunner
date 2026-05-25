@@ -53,6 +53,8 @@ const ConfigSchema = z.object({
   APPROVED_TASK_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
   REQUIRE_USER_APPROVAL_BEFORE_COMMIT: z.coerce.boolean().default(true),
   AGENTRUNNER_WORKER_ROLE: OptionalWorkerRoleSchema,
+  WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  WORKER_POLL_ONCE: z.coerce.boolean().default(false),
 });
 
 export type RuntimeConfig = z.infer<typeof ConfigSchema>;
