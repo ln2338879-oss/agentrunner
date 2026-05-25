@@ -3,6 +3,7 @@ import type { RuntimeStore } from "../db/runtime-store";
 import { botReportNote } from "../obsidian/templates";
 import type { VaultManager } from "../obsidian/vault-manager";
 import type { AgentAdapter, AgentRole } from "../runtime/types";
+import { StepExecutor } from "../workflows/step-executor";
 
 export interface WorkerPollerOptions {
   role: AgentRole;
@@ -16,6 +17,7 @@ export interface WorkerPollerOptions {
 export interface WorkerPollResult {
   claimed: boolean;
   taskId?: string;
+  stepId?: string;
   status?: "completed" | "failed";
   reportPath?: string;
   error?: string;
@@ -25,6 +27,9 @@ export class WorkerPoller {
   constructor(private readonly options: WorkerPollerOptions) {}
 
   async pollOnce(): Promise<WorkerPollResult> {
+    const stepResult = await new StepExecutor(this.options).runOnce();
+    if (stepResult.claimed) return stepResult;
+
     const task = this.options.store.claimPendingTask({
       role: this.options.role,
       owner: this.options.owner,
