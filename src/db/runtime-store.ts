@@ -7,6 +7,7 @@ import type { AgentRole, ReviewVerdict, RuntimeTask, TaskStatus, TaskType } from
 import type { WorkflowPlan } from "../workflows/types";
 
 export type WorkflowStepRunStatus = "pending" | "running" | "completed" | "skipped" | "failed";
+export type StartupRecoveryMode = "requeue" | "block";
 
 export interface TaskSummaryRow {
   id: string;
@@ -113,6 +114,25 @@ export interface SteeringMessageRow {
   discordMessageId: string;
   content: string;
   createdAt: string;
+}
+
+export interface StartupRecoveryRow {
+  taskId: string;
+  taskStatus: string;
+  stepId: string | null;
+  stepStatus: string | null;
+  role: string | null;
+  lockedBy: string | null;
+  lockExpiresAt: string | null;
+}
+
+export interface WorkerHeartbeatRow {
+  owner: string;
+  role: string;
+  pid: number | null;
+  status: string;
+  lastSeenAt: string;
+  metadataJson: string | null;
 }
 
 export class RuntimeStore {
@@ -823,6 +843,117 @@ export class RuntimeStore {
     return rows;
   }
 
+  recoverInterruptedWorkflowSteps(input: { staleMinutes: number; mode: StartupRecoveryMode }): StartupRecoveryRow[] {
+    const staleBefore = new Date(Date.now() - input.staleMinutes * 60_000).toISOString();
+    const now = new Date().toISOString();
+    const rows = this.db.query(`
+      SELECT
+        task.id as taskId,
+        task.status as taskStatus,
+        step.step_id as stepId,
+        step.status as stepStatus,
+        step.role as role,
+        step.locked_by as lockedBy,
+        step.lock_expires_at as lockExpiresAt
+      FROM workflow_step_runs step
+      JOIN tasks task ON task.id = step.task_id
+      WHERE step.status = 'running'
+        AND task.status IN ('pending', 'running', 'needs_revision')
+        AND (step.lock_expires_at IS NULL OR step.lock_expires_at <= $staleBefore OR step.updated_at <= $staleBefore)
+      ORDER BY task.created_at ASC, step.step_index ASC
+    `).all({ $staleBefore: staleBefore }) as StartupRecoveryRow[];
+
+    if (rows.length === 0) return rows;
+
+    const taskIds = [...new Set(rows.map((row) => row.taskId))];
+    const stepUpdate = input.mode === "requeue"
+      ? `
+        UPDATE workflow_step_runs
+        SET status = 'pending', locked_by = NULL, lock_expires_at = NULL, started_at = NULL, finished_at = NULL,
+            error = $reason, updated_at = $now
+        WHERE status = 'running'
+          AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
+      `
+      : `
+        UPDATE workflow_step_runs
+        SET status = 'failed', locked_by = NULL, lock_expires_at = NULL, finished_at = $now,
+            error = $reason, updated_at = $now
+        WHERE status = 'running'
+          AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
+      `;
+    this.db.query(stepUpdate).run({
+      $staleBefore: staleBefore,
+      $reason: `Startup recovery ${input.mode} after stale running step detection.`,
+      $now: now,
+    });
+
+    for (const taskId of taskIds) {
+      const nextStatus = input.mode === "requeue" ? taskStatusAfterRequeue(this.getTask(taskId)?.status) : "blocked";
+      this.db.query(`
+        UPDATE tasks
+        SET status = $status, locked_by = NULL, lock_expires_at = NULL, updated_at = $now
+        WHERE id = $taskId
+      `).run({ $taskId: taskId, $status: nextStatus, $now: now });
+      this.recordRuntimeEvent({
+        kind: "startup_recovery",
+        taskId,
+        message: `Recovered ${rows.filter((row) => row.taskId === taskId).length} interrupted workflow step(s) with mode=${input.mode}.`,
+        metadata: { mode: input.mode, staleBefore },
+      });
+    }
+
+    return rows;
+  }
+
+  recordRuntimeEvent(input: {
+    kind: string;
+    taskId?: string;
+    stepId?: string;
+    owner?: string;
+    message: string;
+    metadata?: unknown;
+  }): void {
+    this.db.query(`
+      INSERT INTO runtime_events (id, kind, task_id, step_id, owner, message, metadata_json, created_at)
+      VALUES ($id, $kind, $taskId, $stepId, $owner, $message, $metadataJson, $createdAt)
+    `).run({
+      $id: `EVT-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      $kind: input.kind,
+      $taskId: input.taskId ?? null,
+      $stepId: input.stepId ?? null,
+      $owner: input.owner ?? null,
+      $message: input.message,
+      $metadataJson: input.metadata === undefined ? null : JSON.stringify(input.metadata),
+      $createdAt: new Date().toISOString(),
+    });
+  }
+
+  upsertWorkerHeartbeat(input: {
+    owner: string;
+    role: AgentRole | "scheduler";
+    pid?: number;
+    status: string;
+    metadata?: unknown;
+  }): void {
+    this.db.query(`
+      INSERT INTO worker_heartbeats (owner, role, pid, status, last_seen_at, metadata_json)
+      VALUES ($owner, $role, $pid, $status, $lastSeenAt, $metadataJson)
+      ON CONFLICT(owner) DO UPDATE SET
+        role = excluded.role,
+        pid = excluded.pid,
+        status = excluded.status,
+        last_seen_at = excluded.last_seen_at,
+        metadata_json = excluded.metadata_json
+    `).run({
+      $owner: input.owner,
+      $role: input.role,
+      $pid: input.pid ?? null,
+      $status: input.status,
+      $lastSeenAt: new Date().toISOString(),
+      $metadataJson: input.metadata === undefined ? null : JSON.stringify(input.metadata),
+    });
+  }
+
   recordTaskRun(input: {
     id: string;
     taskId: string;
@@ -1003,4 +1134,9 @@ function parseStringArray(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function taskStatusAfterRequeue(status: string | undefined): TaskStatus {
+  if (status === "needs_revision") return "needs_revision";
+  return "pending";
 }
