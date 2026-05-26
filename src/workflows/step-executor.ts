@@ -4,6 +4,12 @@ import type { RuntimeNotifier } from "../discord/notifier";
 import { botReportNote, reviewNote } from "../obsidian/templates";
 import type { VaultManager } from "../obsidian/vault-manager";
 import { statusFromVerdict } from "../review/review-loop";
+import {
+  buildReviewSafetyContext,
+  captureReviewSafetySnapshot,
+  compareReviewSafetySnapshots,
+  type ReviewSafetySnapshot,
+} from "../review/review-safety";
 import { parseReviewVerdict } from "../review/verdict";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "../runtime/types";
 
@@ -35,16 +41,18 @@ export class StepExecutor {
     const step = this.claimReadyStep();
     if (!step) return { claimed: false };
 
-    const prompt = this.buildStepPrompt(step);
+    const prompt = await this.buildRuntimePrompt(step);
     const startedAt = new Date().toISOString();
+    const reviewSafetyBefore = await this.captureReviewSafetyBefore(step);
 
     try {
-      const result = await this.options.agent.run({
+      let result = await this.options.agent.run({
         taskId: step.taskId,
         role: this.options.role,
         prompt,
         workspacePath: this.options.config.PROJECT_ROOT,
       });
+      result = await this.applyReviewSafetyResult(step, result, reviewSafetyBefore);
       const output = result.output || result.error || "Step execution returned no output.";
       const reportPath = stepReportPath(step, this.options.role);
       const status = result.ok ? "completed" : "failed";
@@ -136,6 +144,17 @@ export class StepExecutor {
     return null;
   }
 
+  private async buildRuntimePrompt(step: WorkflowStepRunRow): Promise<string> {
+    const prompt = this.buildStepPrompt(step);
+    if (!isReviewAction(step.action)) return prompt;
+
+    const context = await buildReviewSafetyContext({
+      workspacePath: this.options.config.PROJECT_ROOT,
+      config: this.options.config,
+    });
+    return [prompt, context].join("\n\n");
+  }
+
   private buildStepPrompt(step: WorkflowStepRunRow): string {
     const taskPrompt = this.options.store.getTaskPrompt(step.taskId);
     const dependencies = this.options.store
@@ -181,7 +200,7 @@ export class StepExecutor {
         "VERDICT: SPLIT_TASK",
         "VERDICT: RETRY_WITH_DIFFERENT_AGENT",
         "",
-        "Use APPROVED only when the dependency outputs satisfy the original request.",
+        "Use APPROVED only when the dependency outputs satisfy the original request and validation context is acceptable.",
         "Use NEEDS_REVISION when the prior worker can fix concrete issues.",
         "Use BLOCKED when execution cannot continue safely or lacks critical information.",
         "Use NEEDS_HUMAN when explicit user approval, credentials, or a human decision is required.",
@@ -214,6 +233,36 @@ export class StepExecutor {
       "",
       "Execute only this workflow step. Produce a clear step output and mention any artifacts created.",
     ].join("\n");
+  }
+
+  private async captureReviewSafetyBefore(step: WorkflowStepRunRow): Promise<ReviewSafetySnapshot | undefined> {
+    if (!this.options.config.REVIEW_READ_ONLY_GUARD || !isReviewAction(step.action)) return undefined;
+    return captureReviewSafetySnapshot(this.options.config.PROJECT_ROOT);
+  }
+
+  private async applyReviewSafetyResult(
+    step: WorkflowStepRunRow,
+    result: AgentRunResult,
+    before?: ReviewSafetySnapshot,
+  ): Promise<AgentRunResult> {
+    if (!before || !isReviewAction(step.action)) return result;
+    const after = await captureReviewSafetySnapshot(this.options.config.PROJECT_ROOT);
+    const safety = compareReviewSafetySnapshots(before, after);
+    if (safety.ok) return result;
+
+    const output = [
+      result.output || result.error || "Review step returned no output.",
+      "",
+      "## Review Safety Failure",
+      safety.violation,
+    ].join("\n");
+
+    return {
+      ok: false,
+      output,
+      error: "Review read-only guard detected workspace mutations.",
+      artifacts: result.artifacts,
+    };
   }
 
   private recordTaskRun(input: {
@@ -335,7 +384,41 @@ export class StepExecutor {
       return;
     }
 
+    if (input.verdict === "NEEDS_REVISION") {
+      this.requeueRevisionSteps(input.step, round, input.output);
+      return;
+    }
+
     this.options.store.updateTaskStatus(input.step.taskId, statusFromVerdict(input.verdict));
+  }
+
+  private requeueRevisionSteps(step: WorkflowStepRunRow, round: number, feedback: string): void {
+    if (round >= this.options.config.MAX_REVIEW_ROUNDS) {
+      this.options.store.updateTaskStatus(step.taskId, "blocked");
+      return;
+    }
+
+    const allSteps = this.options.store.listWorkflowStepRuns(step.taskId);
+    const dependencyStepIds = parseDependsOn(step.dependsOnJson);
+    const revisionTargets = allSteps.filter(
+      (candidate) => dependencyStepIds.includes(candidate.stepId) && !isReviewAction(candidate.action),
+    );
+    const reason = revisionReason(round, feedback);
+
+    for (const target of revisionTargets) {
+      this.options.store.requeueWorkflowStepRun({
+        taskId: step.taskId,
+        stepId: target.stepId,
+        reason,
+      });
+    }
+
+    this.options.store.requeueWorkflowStepRun({
+      taskId: step.taskId,
+      stepId: step.stepId,
+      reason,
+    });
+    this.options.store.updateTaskStatus(step.taskId, "needs_revision");
   }
 
   private async notifyWorker(input: {
@@ -423,6 +506,15 @@ function parseDependsOn(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function revisionReason(round: number, feedback: string): string {
+  return [`Revision round ${round} requested by review step.`, "", trimLongFeedback(feedback)].join("\n");
+}
+
+function trimLongFeedback(value: string, maxLength = 4000): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}\n... [truncated]`;
 }
 
 function stepReportPath(step: WorkflowStepRunRow, role: AgentRole): string {
