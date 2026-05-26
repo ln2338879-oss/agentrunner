@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { GoogleGenAI } from "@google/genai";
 import type { RuntimeConfig } from "../config";
+import { classifyProviderError, formatHumanEscalation } from "../providers/error-classifier";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
 
 export interface GeminiInlineDataPart {
@@ -32,10 +33,20 @@ export class DesignerAgent implements AgentAdapter {
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     if (!this.config.GEMINI_API_KEY) {
+      const classification = classifyProviderError({
+        provider: "Gemini Image",
+        error: "GEMINI_API_KEY is required for DesignerAgent.",
+      });
       return {
         ok: false,
-        output: "Gemini image generation is not configured.",
-        error: "GEMINI_API_KEY is required for DesignerAgent.",
+        output: formatHumanEscalation({
+          provider: "Gemini Image",
+          classification: { ...classification, needsHuman: true, kind: "auth" },
+          stderr: "GEMINI_API_KEY is required for DesignerAgent.",
+        }),
+        error: "Gemini image generation requires a human to configure GEMINI_API_KEY.",
+        errorKind: "auth",
+        needsHuman: true,
       };
     }
 
@@ -68,10 +79,16 @@ export class DesignerAgent implements AgentAdapter {
         artifacts: result.artifacts,
       };
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const classification = classifyProviderError({ provider: "Gemini Image", error: message });
       return {
         ok: false,
-        output: "DesignerAgent failed to generate image output.",
-        error: error instanceof Error ? error.message : String(error),
+        output: classification.needsHuman
+          ? formatHumanEscalation({ provider: "Gemini Image", classification, stderr: message })
+          : "DesignerAgent failed to generate image output.",
+        error: classification.needsHuman ? classification.reason : message,
+        errorKind: classification.kind,
+        needsHuman: classification.needsHuman,
       };
     }
   }
