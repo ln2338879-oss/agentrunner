@@ -101,4 +101,52 @@ describe("workflow step runs", () => {
     expect(timeline.map((event) => event.kind)).toContain("workflow_step");
     expect(timeline.find((event) => event.label.includes("generate"))?.path).toBe("06_FactoryOutputs/TASK-STEPS-3-factory-round-1.md");
   });
+
+  test("claims a pending task only once", async () => {
+    const store = await createTempStore();
+
+    store.createTask({
+      id: "TASK-CLAIM-ONCE",
+      title: "Claim once",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-CLAIM-ONCE.md",
+    });
+
+    const first = store.claimPendingTask({ role: "builder", owner: "worker:a", ttlMinutes: 30 });
+    const second = store.claimPendingTask({ role: "builder", owner: "worker:b", ttlMinutes: 30 });
+
+    expect(first?.id).toBe("TASK-CLAIM-ONCE");
+    expect(first?.lockedBy).toBe("worker:a");
+    expect(second).toBeNull();
+    expect(store.getTask("TASK-CLAIM-ONCE")?.lockedBy).toBe("worker:a");
+  });
+
+  test("claims a ready workflow step only once", async () => {
+    const store = await createTempStore();
+    const workflowPlan = createDefaultWorkflowRegistry().plan(undefined, "implementation");
+
+    store.createTask({
+      id: "TASK-STEP-CLAIM-ONCE",
+      title: "Step claim once",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-STEP-CLAIM-ONCE.md",
+      workflowPlan,
+    });
+    store.completeWorkflowStepRun({
+      taskId: "TASK-STEP-CLAIM-ONCE",
+      stepId: "plan",
+      outputRef: "01_Tasks/TASK-STEP-CLAIM-ONCE.md",
+    });
+
+    const first = store.claimReadyWorkflowStep({ roleId: "builder", owner: "worker:a", ttlMinutes: 30 });
+    const second = store.claimReadyWorkflowStep({ roleId: "builder", owner: "worker:b", ttlMinutes: 30 });
+
+    expect(first?.taskId).toBe("TASK-STEP-CLAIM-ONCE");
+    expect(first?.stepId).toBe("build");
+    expect(first?.lockedBy).toBe("worker:a");
+    expect(second).toBeNull();
+    expect(store.getWorkflowStepRun("TASK-STEP-CLAIM-ONCE", "build")?.lockedBy).toBe("worker:a");
+  });
 });
