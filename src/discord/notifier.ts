@@ -1,6 +1,7 @@
 import type { Client } from "discord.js";
 import type { RuntimeConfig } from "../config";
 import type { AgentRole, ReviewVerdict } from "../runtime/types";
+import { statusChannel } from "./channels";
 
 export interface RuntimeNotifier {
   taskCreated(input: { taskId: string; role: AgentRole; obsidianPath: string; content: string }): Promise<void>;
@@ -29,59 +30,61 @@ export class DiscordNotifier implements RuntimeNotifier {
   ) {}
 
   async taskCreated(input: { taskId: string; role: AgentRole; obsidianPath: string; content: string }): Promise<void> {
-    await this.send(this.config.GAME_DIRECTOR_CHANNEL_ID, [
-      `🎮 작업 생성: ${input.taskId}`,
-      `담당 역할: ${input.role}`,
-      `Obsidian Task: ${input.obsidianPath}`,
-      `요청: ${trim(input.content, 500)}`,
+    await this.send(statusChannel(this.config, input.role), [
+      `task created: ${input.taskId}`,
+      `role: ${input.role}`,
+      `note: ${input.obsidianPath}`,
+      `request: ${trim(input.content, 500)}`,
     ].join("\n"));
   }
 
   async workerReport(input: { taskId: string; role: AgentRole; reportPath: string; round: number }): Promise<void> {
-    const channelId = input.role === "builder" ? this.config.DEV_TASKS_CHANNEL_ID : input.role === "factory" ? this.config.CONTENT_FACTORY_CHANNEL_ID : this.config.REVIEW_LOG_CHANNEL_ID;
-    await this.send(channelId, [
-      `🛠️ ${input.role} round ${input.round} 완료: ${input.taskId}`,
-      `Report: ${input.reportPath}`,
+    await this.send(statusChannel(this.config, input.role), [
+      `worker report: ${input.taskId}`,
+      `role: ${input.role}`,
+      `round: ${input.round}`,
+      `report: ${input.reportPath}`,
     ].join("\n"));
   }
 
   async reviewResult(input: { taskId: string; verdict: ReviewVerdict; reviewPath: string; round: number }): Promise<void> {
-    await this.send(this.config.REVIEW_LOG_CHANNEL_ID, [
-      `🔎 Director review round ${input.round}: ${input.taskId}`,
-      `Verdict: ${input.verdict}`,
-      `Review: ${input.reviewPath}`,
+    await this.send(statusChannel(this.config, "director"), [
+      `director review: ${input.taskId}`,
+      `round: ${input.round}`,
+      `verdict: ${input.verdict}`,
+      `review: ${input.reviewPath}`,
     ].join("\n"));
   }
 
   async approved(input: { taskId: string; approvedPath: string; reportPath: string; reviewPath: string }): Promise<void> {
-    await this.send(this.config.REVIEW_LOG_CHANNEL_ID, [
-      `✅ 승인 완료: ${input.taskId}`,
-      `Approved: ${input.approvedPath}`,
-      `Report: ${input.reportPath}`,
-      `Review: ${input.reviewPath}`,
+    await this.send(statusChannel(this.config, "director"), [
+      `approved: ${input.taskId}`,
+      `final: ${input.approvedPath}`,
+      `report: ${input.reportPath}`,
+      `review: ${input.reviewPath}`,
     ].join("\n"));
   }
 
   async blocked(input: { taskId: string; reviewPath?: string; reason?: string }): Promise<void> {
-    await this.send(this.config.REVIEW_LOG_CHANNEL_ID, [
-      `🚫 차단됨: ${input.taskId}`,
-      input.reviewPath ? `Review: ${input.reviewPath}` : undefined,
-      input.reason ? `Reason: ${trim(input.reason, 800)}` : undefined,
+    await this.send(statusChannel(this.config, "director"), [
+      `blocked: ${input.taskId}`,
+      input.reviewPath ? `review: ${input.reviewPath}` : undefined,
+      input.reason ? `reason: ${trim(input.reason, 800)}` : undefined,
     ].filter(Boolean).join("\n"));
   }
 
   async failed(input: { taskId: string; reportPath?: string; reason?: string }): Promise<void> {
-    await this.send(this.config.BUILD_LOG_CHANNEL_ID || this.config.REVIEW_LOG_CHANNEL_ID, [
-      `❌ 실패: ${input.taskId}`,
-      input.reportPath ? `Report: ${input.reportPath}` : undefined,
-      input.reason ? `Reason: ${trim(input.reason, 800)}` : undefined,
+    await this.send(statusChannel(this.config, "builder"), [
+      `failed: ${input.taskId}`,
+      input.reportPath ? `report: ${input.reportPath}` : undefined,
+      input.reason ? `reason: ${trim(input.reason, 800)}` : undefined,
     ].filter(Boolean).join("\n"));
   }
 
   async recovery(input: { count: number; path: string }): Promise<void> {
-    await this.send(this.config.REVIEW_LOG_CHANNEL_ID || this.config.GAME_DIRECTOR_CHANNEL_ID, [
-      `♻️ 시작 복구 완료: stale task ${input.count}개 차단 처리`,
-      `Recovery note: ${input.path}`,
+    await this.send(statusChannel(this.config, "director"), [
+      `startup recovery: ${input.count} task(s) updated`,
+      `note: ${input.path}`,
     ].join("\n"));
   }
 

@@ -1,10 +1,11 @@
 import { Client, GatewayIntentBits } from "discord.js";
 import { RuntimeConfig } from "../config";
 import type { RuntimeStore } from "../db/runtime-store";
+import { Orchestrator } from "../runtime/orchestrator";
 import { buildDesignChoiceReply } from "./design-choice";
 import { persistAttachmentContext } from "./attachments";
 import { handleDirectorCommand, isCommand, parseRetryCommand } from "./commands";
-import { Orchestrator } from "../runtime/orchestrator";
+import { formatUserTaskResponse } from "./user-response";
 
 export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestrator, store: RuntimeStore): Client {
   const client = new Client({
@@ -44,13 +45,12 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
           await interaction.editReply(`Task not found: ${taskId}`);
           return;
         }
-
         const result = await orchestrator.handleUserRequest({
-          content: buildRetryContent(taskId, task),
+          content: retryContent(taskId, task.title),
           discordMessageId: interaction.id,
           discordChannelId: interaction.channelId,
         });
-        await interaction.editReply(formatTaskResult({ result, prefix: `Retry task created: ${result.taskId}\nSource task: ${taskId}` }));
+        await interaction.editReply(formatUserTaskResponse({ result, prefix: `Retry task ${result.taskId}` }));
         return;
       }
 
@@ -61,18 +61,14 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
           await interaction.reply(designReply);
           return;
         }
-
         await interaction.deferReply();
         const result = await orchestrator.handleUserRequest({
           content: prompt,
           discordMessageId: interaction.id,
           discordChannelId: interaction.channelId,
         });
-        await interaction.editReply(formatTaskResult({ result, prefix: `Task created: ${result.taskId}` }));
-        return;
+        await interaction.editReply(formatUserTaskResponse({ result, prefix: `Task ${result.taskId}` }));
       }
-
-      await interaction.reply({ content: `Unknown command: ${interaction.commandName}`, ephemeral: true });
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       if (interaction.deferred || interaction.replied) await interaction.editReply(`AgentRunner failed: ${messageText}`);
@@ -85,19 +81,10 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
     if (config.GAME_DIRECTOR_CHANNEL_ID && message.channelId !== config.GAME_DIRECTOR_CHANNEL_ID) return;
 
     try {
-      const session = store.getOrCreateSession({
-        discordChannelId: message.channelId,
-        title: `Discord channel ${message.channelId}`,
-      });
-
+      const session = store.getOrCreateSession({ discordChannelId: message.channelId, title: `Discord channel ${message.channelId}` });
       const steer = parseSteeringCommand(message.content);
       if (steer) {
-        store.recordSteeringMessage({
-          id: `STEER-${Date.now()}`,
-          taskId: steer.taskId,
-          discordMessageId: message.id,
-          content: steer.content,
-        });
+        store.recordSteeringMessage({ id: `STEER-${Date.now()}`, taskId: steer.taskId, discordMessageId: message.id, content: steer.content });
         await message.reply(`Steering queued for ${steer.taskId}.`);
         return;
       }
@@ -118,11 +105,11 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
           return;
         }
         const result = await orchestrator.handleUserRequest({
-          content: withSessionContext(withAttachmentContext(buildRetryContent(retryTaskId, task), attachmentContext.markdown), store, session.id),
+          content: withSessionContext(retryContent(retryTaskId, task.title), store, session.id),
           discordMessageId: message.id,
           discordChannelId: message.channelId,
         });
-        await message.reply(formatTaskResult({ result, prefix: `Retry task created: ${result.taskId}\nSource task: ${retryTaskId}` }));
+        await message.reply(formatUserTaskResponse({ result, prefix: `Retry task ${result.taskId}` }));
         return;
       }
 
@@ -154,7 +141,7 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
         discordMessageId: message.id,
         discordChannelId: message.channelId,
       });
-      await message.reply(formatTaskResult({ result, prefix: `Task created: ${result.taskId}` }));
+      await message.reply(formatUserTaskResponse({ result, prefix: `Task ${result.taskId}` }));
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       await message.reply(`AgentRunner failed: ${messageText}`);
@@ -162,6 +149,10 @@ export function createDirectorBot(config: RuntimeConfig, orchestrator: Orchestra
   });
 
   return client;
+}
+
+function retryContent(taskId: string, title: string): string {
+  return [`Retry AgentRunner task ${taskId}.`, "", title].join("\n");
 }
 
 function withAttachmentContext(content: string, attachmentContext: string): string {
@@ -187,42 +178,4 @@ function parseSteeringCommand(content: string): { taskId: string; content: strin
   const match = content.trim().match(/^!steer\s+(TASK-\S+)\s+([\s\S]+)$/i);
   if (!match) return null;
   return { taskId: match[1], content: match[2].trim() };
-}
-
-function buildRetryContent(taskId: string, task: ReturnType<RuntimeStore["getTask"]>): string {
-  if (!task) return `Retry previous AgentRunner task ${taskId}.`;
-  return [
-    `Retry previous AgentRunner task ${taskId}.`,
-    "",
-    "Original task summary:",
-    task.title,
-    "",
-    `Previous status: ${task.status}`,
-    `Previous assigned role: ${task.assignedTo}`,
-    `Previous round: ${task.currentRound}`,
-    `Previous task note: ${task.obsidianPath}`,
-  ].join("\n");
-}
-
-function formatTaskResult(input: {
-  result: {
-    taskId: string;
-    assignedTo: string;
-    obsidianPath: string;
-    reportPath: string;
-    reviewPath?: string;
-    approvedPath?: string;
-    verdict?: string;
-  };
-  prefix: string;
-}): string {
-  return [
-    input.prefix,
-    `Role: ${input.result.assignedTo}`,
-    input.result.verdict ? `Director verdict: ${input.result.verdict}` : undefined,
-    `Task note: ${input.result.obsidianPath}`,
-    `Report: ${input.result.reportPath}`,
-    input.result.reviewPath ? `Review: ${input.result.reviewPath}` : undefined,
-    input.result.approvedPath ? `Final: ${input.result.approvedPath}` : undefined,
-  ].filter(Boolean).join("\n");
 }
