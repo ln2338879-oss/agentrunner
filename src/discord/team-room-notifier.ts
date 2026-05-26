@@ -3,6 +3,11 @@ import type { RuntimeConfig } from "../config";
 import type { AgentRole, ReviewVerdict } from "../runtime/types";
 import { statusChannel } from "./channels";
 import type { RuntimeNotifier } from "./notifier";
+import { formatDoneTurn, formatReviewTurn, formatWorkerTurn } from "./team-turns";
+
+type WorkerInput = { taskId: string; role: AgentRole; reportPath: string; round: number; output?: string };
+type ReviewInput = { taskId: string; verdict: ReviewVerdict; reviewPath: string; round: number; output?: string };
+type DoneInput = { taskId: string; approvedPath: string; reportPath: string; reviewPath: string; output?: string };
 
 export class TeamRoomNotifier implements RuntimeNotifier {
   constructor(
@@ -12,36 +17,37 @@ export class TeamRoomNotifier implements RuntimeNotifier {
   ) {}
 
   async taskCreated(input: { taskId: string; role: AgentRole; obsidianPath: string; content: string }): Promise<void> {
-    await this.status(input.role, `task created: ${input.taskId}\nrole: ${input.role}\nnote: ${input.obsidianPath}`);
-    await this.say("director", `Director:\nI received the request and assigned it to ${roleLabel(input.role)}.\nTask: ${input.taskId}`);
+    await this.status(input.role, `task ${input.taskId} ${input.role}`);
+    await this.say("director", `Director:\n${input.taskId} assigned to ${label(input.role)}.`);
   }
 
-  async workerReport(input: { taskId: string; role: AgentRole; reportPath: string; round: number }): Promise<void> {
-    await this.status(input.role, `worker report: ${input.taskId}\nrole: ${input.role}\nround: ${input.round}\nreport: ${input.reportPath}`);
+  async workerReport(input: WorkerInput): Promise<void> {
+    await this.status(input.role, `report ${input.taskId} ${input.reportPath}`);
+    if (input.output) await this.say(input.role, formatWorkerTurn({ role: input.role, output: input.output }));
   }
 
-  async reviewResult(input: { taskId: string; verdict: ReviewVerdict; reviewPath: string; round: number }): Promise<void> {
-    await this.status("director", `director review: ${input.taskId}\nround: ${input.round}\nverdict: ${input.verdict}\nreview: ${input.reviewPath}`);
-    await this.say("director", `Director:\nReview result for ${input.taskId}: ${input.verdict}`);
+  async reviewResult(input: ReviewInput): Promise<void> {
+    await this.status("director", `review ${input.taskId} ${input.verdict}`);
+    await this.say("director", formatReviewTurn({ verdict: input.verdict, output: input.output }));
   }
 
-  async approved(input: { taskId: string; approvedPath: string; reportPath: string; reviewPath: string }): Promise<void> {
-    await this.status("director", `approved: ${input.taskId}\nfinal: ${input.approvedPath}`);
-    await this.say("director", `Director:\nTask ${input.taskId} is complete.`);
+  async approved(input: DoneInput): Promise<void> {
+    await this.status("director", `done ${input.taskId}`);
+    await this.say("director", formatDoneTurn({ taskId: input.taskId, output: input.output }));
   }
 
   async blocked(input: { taskId: string; reviewPath?: string; reason?: string }): Promise<void> {
-    await this.status("director", `stopped: ${input.taskId}${input.reason ? `\nreason: ${trim(input.reason, 800)}` : ""}`);
-    await this.say("director", `Director:\nTask ${input.taskId} needs attention.${input.reason ? `\n${trim(input.reason, 900)}` : ""}`);
+    await this.status("director", `hold ${input.taskId}`);
+    await this.say("director", `Director:\n${input.taskId} needs attention.${input.reason ? `\n${clip(input.reason, 900)}` : ""}`);
   }
 
   async failed(input: { taskId: string; reportPath?: string; reason?: string }): Promise<void> {
-    await this.status("builder", `failed: ${input.taskId}${input.reportPath ? `\nreport: ${input.reportPath}` : ""}`);
-    await this.say("director", `Director:\nTask ${input.taskId} failed.${input.reason ? `\n${trim(input.reason, 900)}` : ""}`);
+    await this.status("builder", `error ${input.taskId}`);
+    await this.say("director", `Director:\n${input.taskId} could not finish.${input.reason ? `\n${clip(input.reason, 900)}` : ""}`);
   }
 
   async recovery(input: { count: number; path: string }): Promise<void> {
-    await this.status("director", `startup recovery: ${input.count}\nnote: ${input.path}`);
+    await this.status("director", `recovery ${input.count} ${input.path}`);
   }
 
   private async status(role: AgentRole, message: string): Promise<void> {
@@ -61,14 +67,14 @@ async function send(client: Client, channelId: string, message: string): Promise
   await sendable.send(message);
 }
 
-function roleLabel(role: AgentRole): string {
+function label(role: AgentRole): string {
   if (role === "builder") return "Builder";
   if (role === "factory") return "Factory";
   if (role === "designer") return "Designer";
   return "Director";
 }
 
-function trim(value: string, maxLength: number): string {
+function clip(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength)}...`;
 }
