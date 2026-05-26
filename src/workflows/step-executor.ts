@@ -1,5 +1,6 @@
 import type { RuntimeConfig } from "../config";
 import type { RuntimeStore, WorkflowStepRunRow } from "../db/runtime-store";
+import type { RuntimeNotifier } from "../discord/notifier";
 import { botReportNote, reviewNote } from "../obsidian/templates";
 import type { VaultManager } from "../obsidian/vault-manager";
 import { statusFromVerdict } from "../review/review-loop";
@@ -13,6 +14,7 @@ export interface StepExecutorOptions {
   vault: VaultManager;
   agent: AgentAdapter;
   config: RuntimeConfig;
+  notifier?: RuntimeNotifier;
 }
 
 export interface StepExecutorResult {
@@ -23,6 +25,7 @@ export interface StepExecutorResult {
   reportPath?: string;
   verdict?: ReviewVerdict;
   error?: string;
+  output?: string;
 }
 
 export class StepExecutor {
@@ -58,8 +61,13 @@ export class StepExecutor {
           owner: this.options.owner,
           outputRef: reportPath,
         });
-        if (verdict) this.recordReviewVerdict({ step, verdict, output, reportPath });
-        else this.completeTaskIfDone(step.taskId);
+        if (verdict) {
+          this.recordReviewVerdict({ step, verdict, output, reportPath });
+          await this.notifyReview({ step, verdict, output, reportPath });
+        } else {
+          this.completeTaskIfDone(step.taskId);
+          await this.notifyWorker({ step, output, reportPath });
+        }
       } else {
         this.options.store.failWorkflowStepRun({
           taskId: step.taskId,
@@ -69,6 +77,7 @@ export class StepExecutor {
           error: result.error ?? "Step execution failed.",
         });
         if (step.required) this.options.store.updateTaskStatus(step.taskId, "failed");
+        await this.notifyWorker({ step, output, reportPath });
       }
 
       return {
@@ -79,6 +88,7 @@ export class StepExecutor {
         reportPath,
         verdict,
         error: result.error,
+        output,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -109,6 +119,7 @@ export class StepExecutor {
         stepId: step.stepId,
         status: "failed",
         error: message,
+        output: message,
       };
     }
   }
@@ -327,6 +338,35 @@ export class StepExecutor {
     this.options.store.updateTaskStatus(input.step.taskId, statusFromVerdict(input.verdict));
   }
 
+  private async notifyWorker(input: {
+    step: WorkflowStepRunRow;
+    output: string;
+    reportPath: string;
+  }): Promise<void> {
+    await this.options.notifier?.workerReport({
+      taskId: input.step.taskId,
+      role: this.options.role,
+      reportPath: input.reportPath,
+      round: workflowStepRound(input.step.stepIndex),
+      output: input.output,
+    } as Parameters<RuntimeNotifier["workerReport"]>[0] & { output: string });
+  }
+
+  private async notifyReview(input: {
+    step: WorkflowStepRunRow;
+    verdict: ReviewVerdict;
+    output: string;
+    reportPath: string;
+  }): Promise<void> {
+    await this.options.notifier?.reviewResult({
+      taskId: input.step.taskId,
+      verdict: input.verdict,
+      reviewPath: input.reportPath,
+      round: nextReviewRound(this.options.store, input.step.taskId),
+      output: input.output,
+    } as Parameters<RuntimeNotifier["reviewResult"]>[0] & { output: string });
+  }
+
   private completeTaskIfDone(taskId: string): void {
     const steps = this.options.store.listWorkflowStepRuns(taskId);
     const requiredDone = steps
@@ -370,6 +410,10 @@ function isReviewAction(action: string): boolean {
 
 function nextReviewRound(store: RuntimeStore, taskId: string): number {
   return store.listTaskReviews(taskId).length + 1;
+}
+
+function workflowStepRound(stepIndex: number): number {
+  return stepIndex + 1;
 }
 
 function parseDependsOn(value: string): string[] {
