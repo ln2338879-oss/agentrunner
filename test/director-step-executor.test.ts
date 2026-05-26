@@ -39,9 +39,9 @@ function directorAgent(output: string, ok = true): AgentAdapter {
   };
 }
 
-function recordingDirectorAgent(input: { output: string; prompts: string[] }): AgentAdapter {
+function recordingAgent(input: { role: "director" | "builder"; output: string; prompts: string[] }): AgentAdapter {
   return {
-    role: "director",
+    role: input.role,
     async run(runInput: AgentRunInput): Promise<AgentRunResult> {
       input.prompts.push(runInput.prompt);
       return { ok: true, output: input.output };
@@ -176,7 +176,7 @@ describe("director workflow step execution", () => {
       owner: "worker:director",
       store,
       vault,
-      agent: recordingDirectorAgent({ output: "VERDICT: APPROVED\nLooks good.", prompts }),
+      agent: recordingAgent({ role: "director", output: "VERDICT: APPROVED\nLooks good.", prompts }),
       config,
     }).runOnce();
 
@@ -204,6 +204,36 @@ describe("director workflow step execution", () => {
     expect(store.getWorkflowStepRun("TASK-REVISION-REQUEUE", "review")?.status).toBe("pending");
     expect(store.getTask("TASK-REVISION-REQUEUE")?.status).toBe("needs_revision");
     expect(store.listTaskReviews("TASK-REVISION-REQUEUE")[0]?.verdict).toBe("NEEDS_REVISION");
+  });
+
+  test("requeued builder prompt includes prior review feedback", async () => {
+    const { store, vault, config } = await createRuntime();
+    await createImplementationTask(store, "TASK-REVISION-FEEDBACK");
+    completePlanAndBuild(store, "TASK-REVISION-FEEDBACK");
+
+    await new StepExecutor({
+      role: "director",
+      owner: "worker:director",
+      store,
+      vault,
+      agent: directorAgent("VERDICT: NEEDS_REVISION\nFix the failing tests and rerun validation."),
+      config,
+    }).runOnce();
+
+    const prompts: string[] = [];
+    const result = await new StepExecutor({
+      role: "builder",
+      owner: "worker:builder",
+      store,
+      vault,
+      agent: recordingAgent({ role: "builder", output: "Builder fixed the tests.", prompts }),
+      config,
+    }).runOnce();
+
+    expect(result.stepId).toBe("build");
+    expect(prompts[0]).toContain("## Prior Review Feedback");
+    expect(prompts[0]).toContain("Fix the failing tests and rerun validation.");
+    expect(prompts[0]).toContain("Current Step Requeue Reason");
   });
 
   test("review read-only guard fails if reviewer mutates workspace", async () => {
