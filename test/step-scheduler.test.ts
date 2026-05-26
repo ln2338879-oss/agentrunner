@@ -3,9 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "../src/config";
+import type { RuntimeNotifier } from "../src/discord/notifier";
 import { RuntimeStore } from "../src/db/runtime-store";
 import { VaultManager } from "../src/obsidian/vault-manager";
-import type { AgentAdapter, AgentRole, AgentRunInput, AgentRunResult } from "../src/runtime/types";
+import type { AgentAdapter, AgentRole, AgentRunInput, AgentRunResult, ReviewVerdict } from "../src/runtime/types";
 import { createDefaultWorkflowRegistry } from "../src/workflows/engine";
 import { StepScheduler } from "../src/workflows/step-scheduler";
 
@@ -38,6 +39,22 @@ function agent(role: AgentRole, run: (input: AgentRunInput) => AgentRunResult): 
     async run(input: AgentRunInput): Promise<AgentRunResult> {
       return run(input);
     },
+  };
+}
+
+function recordingNotifier(events: string[]): RuntimeNotifier {
+  return {
+    async taskCreated(): Promise<void> {},
+    async workerReport(input: { role: AgentRole; output?: string }): Promise<void> {
+      events.push(`${input.role}:${input.output ?? ""}`);
+    },
+    async reviewResult(input: { verdict: ReviewVerdict; output?: string }): Promise<void> {
+      events.push(`director:${input.verdict}:${input.output ?? ""}`);
+    },
+    async approved(): Promise<void> {},
+    async blocked(): Promise<void> {},
+    async failed(): Promise<void> {},
+    async recovery(): Promise<void> {},
   };
 }
 
@@ -89,6 +106,50 @@ describe("StepScheduler", () => {
     expect(store.getWorkflowStepRun("TASK-SCHED-1", "review")?.status).toBe("completed");
     expect(store.getWorkflowStepRun("TASK-SCHED-1", "arbitrate-if-blocked")?.status).toBe("skipped");
     expect(store.getTask("TASK-SCHED-1")?.status).toBe("approved");
+  });
+
+  test("passes step outputs to notifier", async () => {
+    const { store, vault, config } = await createRuntime();
+    const events: string[] = [];
+    const workflowPlan = createDefaultWorkflowRegistry().plan(undefined, "implementation");
+
+    store.createTask({
+      id: "TASK-SCHED-NOTIFY",
+      title: "Notify scheduled workflow",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-SCHED-NOTIFY.md",
+      workflowPlan,
+    });
+    store.recordMessage({
+      id: "MSG-SCHED-NOTIFY",
+      discordMessageId: "discord-sched-notify",
+      discordChannelId: "manual",
+      taskId: "TASK-SCHED-NOTIFY",
+      senderRole: "director",
+      content: "Plan, build, and review this feature.",
+    });
+
+    const scheduler = new StepScheduler({
+      store,
+      vault,
+      config,
+      notifier: recordingNotifier(events),
+      agents: [
+        agent("director", (input) => ({
+          ok: true,
+          output: input.prompt.includes("Review Step") ? "VERDICT: APPROVED\nShip it." : "## Plan\n- Build it.",
+        })),
+        agent("builder", () => ({ ok: true, output: "Built with scheduler." })),
+      ],
+      maxStepsPerCycle: 10,
+      roleOrder: ["director", "builder", "director"],
+    });
+
+    await scheduler.runCycle();
+
+    expect(events).toContain("builder:Built with scheduler.");
+    expect(events.some((event) => event.includes("director:APPROVED"))).toBe(true);
   });
 
   test("returns idle cycle when no ready workflow steps exist", async () => {
