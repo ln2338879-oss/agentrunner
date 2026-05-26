@@ -10,7 +10,7 @@ import { formatUserTaskResponse } from "./user-response";
 export type DiscordWorkerRole = Extract<AgentRole, "builder" | "factory" | "designer">;
 
 export function workerBotDescription(role: DiscordWorkerRole): string {
-  if (role === "designer") return "Designer worker bot received the visual task handoff.";
+  if (role === "designer") return "Designer worker bot received the visual task handoff. Gemini image generation can be used for image outputs.";
   if (role === "factory") return "Factory worker bot received the content task handoff.";
   return "Builder worker bot received the implementation task handoff.";
 }
