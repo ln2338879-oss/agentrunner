@@ -1,5 +1,6 @@
 import type { RuntimeConfig } from "../config";
 import type { RuntimeStore } from "../db/runtime-store";
+import type { RuntimeNotifier } from "../discord/notifier";
 import type { VaultManager } from "../obsidian/vault-manager";
 import type { AgentAdapter, AgentRole } from "../runtime/types";
 import { StepExecutor, type StepExecutorResult } from "./step-executor";
@@ -12,6 +13,7 @@ export interface StepSchedulerOptions {
   ownerPrefix?: string;
   roleOrder?: AgentRole[];
   maxStepsPerCycle?: number;
+  notifier?: RuntimeNotifier;
 }
 
 export interface StepSchedulerCycleResult {
@@ -44,22 +46,16 @@ export class StepScheduler {
       processed += 1;
     }
 
-    return {
-      processed,
-      idle: processed === 0,
-      results,
-    };
+    return { processed, idle: processed === 0, results };
   }
 
   async runLoop(input: { once?: boolean; intervalMs?: number; onCycle?: (result: StepSchedulerCycleResult) => void | Promise<void> } = {}): Promise<void> {
     const intervalMs = input.intervalMs ?? this.options.config.WORKER_POLL_INTERVAL_MS;
-
     if (input.once) {
       const result = await this.runCycle();
       await input.onCycle?.(result);
       return;
     }
-
     for (;;) {
       const result = await this.runCycle();
       await input.onCycle?.(result);
@@ -69,11 +65,9 @@ export class StepScheduler {
 
   private async runOneSweep(): Promise<StepExecutorResult | null> {
     const seenRolesThisSweep = new Set<AgentRole>();
-
     for (const role of this.roleOrder) {
       const agent = this.agents.get(role);
       if (!agent) continue;
-
       const result = await new StepExecutor({
         role,
         owner: `${this.ownerPrefix}:${role}`,
@@ -81,12 +75,11 @@ export class StepScheduler {
         vault: this.options.vault,
         agent,
         config: this.options.config,
+        notifier: this.options.notifier,
       }).runOnce();
-
       if (result.claimed) return result;
       seenRolesThisSweep.add(role);
     }
-
     return seenRolesThisSweep.size > 0 ? null : null;
   }
 }
