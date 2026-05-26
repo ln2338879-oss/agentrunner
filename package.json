@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
+    "team": "bun src/team-room/index.ts",
     "dashboard": "bun src/dashboard/index.ts",
     "doctor": "bun src/doctor.ts",
     "proof": "bun src/proof.ts",
