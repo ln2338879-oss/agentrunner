@@ -30,6 +30,7 @@ describe("workflow routing integration", () => {
 
     expect(classified.type).toBe("implementation");
     expect(classified.assignedTo).toBe("builder");
+    expect(classified.confidence).not.toBe("low");
     expect(workflowPlan.workflowId).toBe("plan-build-review");
     expect(workflowPlan.steps.map((step) => step.id)).toEqual(["plan", "build", "review", "arbitrate-if-blocked"]);
   });
@@ -45,6 +46,40 @@ describe("workflow routing integration", () => {
     expect(classified.assignedTo).toBe("designer");
     expect(workflowPlan.workflowId).toBe("plan-design-review");
     expect(workflowPlan.steps.map((step) => step.id)).toEqual(["plan", "design", "review"]);
+  });
+
+  test("routes image processing bugs to builder instead of designer", () => {
+    const classified = classifyTask("이미지 처리 버그 수정해줘");
+
+    expect(classified.type).toBe("implementation");
+    expect(classified.assignedTo).toBe("builder");
+    expect(classified.scores.builder).toBeGreaterThan(classified.scores.designer);
+    expect(classified.signals).toContain("implementation override for visual technical/fix request");
+  });
+
+  test("routes game content system code changes to builder instead of factory", () => {
+    const classified = classifyTask("NPC 생성 시스템 코드 고쳐줘");
+
+    expect(classified.type).toBe("implementation");
+    expect(classified.assignedTo).toBe("builder");
+    expect(classified.scores.builder).toBeGreaterThan(classified.scores.factory);
+  });
+
+  test("routes structured data creation to factory when no implementation signal exists", () => {
+    const classified = classifyTask("몬스터 스탯을 CSV로 정리해줘");
+
+    expect(classified.type).toBe("content");
+    expect(classified.assignedTo).toBe("factory");
+    expect(classified.scores.factory).toBeGreaterThan(classified.scores.builder);
+  });
+
+  test("routes genuinely ambiguous asset requests to director", () => {
+    const classified = classifyTask("게임 에셋 구조를 분석하고 이미지와 CSV까지 정리해줘");
+
+    expect(classified.type).toBe("planning");
+    expect(classified.assignedTo).toBe("director");
+    expect(classified.confidence).toBe("low");
+    expect(classified.ambiguity.length).toBeGreaterThan(0);
   });
 
   test("persists workflow plan metadata on task rows", async () => {
