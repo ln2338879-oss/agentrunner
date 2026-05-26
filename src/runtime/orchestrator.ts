@@ -211,8 +211,28 @@ export class Orchestrator {
             outputRef: latestReportPath,
             error: result.result.error ?? "Worker failed.",
           });
-          this.store.updateTaskStatus(taskId, "failed");
-          await this.notifier.failed({ taskId, reportPath: latestReportPath, reason: result.result.error });
+          if (result.result.needsHuman) {
+            this.store.updateTaskStatus(taskId, "needs_human");
+            this.store.recordRuntimeEvent({
+              kind: "human_intervention_required",
+              taskId,
+              owner: leaseOwner,
+              message: result.result.error ?? "Provider requires human intervention.",
+              metadata: {
+                role: classified.assignedTo,
+                errorKind: result.result.errorKind,
+                reportPath: latestReportPath,
+              },
+            });
+            await this.notifier.blocked({
+              taskId,
+              reviewPath: latestReportPath,
+              reason: result.result.error ?? "Provider requires human intervention.",
+            });
+          } else {
+            this.store.updateTaskStatus(taskId, "failed");
+            await this.notifier.failed({ taskId, reportPath: latestReportPath, reason: result.result.error });
+          }
           return {
             taskId,
             assignedTo: classified.assignedTo,
@@ -369,15 +389,21 @@ export class Orchestrator {
       botReportNote({
         taskId: input.taskId,
         role: input.role,
-        status: result.ok ? "ready_for_review" : "failed",
-        body: result.output + (result.error ? `\n\n## Error\n\n${result.error}` : ""),
+        status: result.ok ? "ready_for_review" : result.needsHuman ? "needs_human" : "failed",
+        body: [
+          result.errorKind ? `Error kind: ${result.errorKind}` : "",
+          result.needsHuman ? "Human intervention required: true" : "",
+          "",
+          result.output,
+          result.error ? `\n## Error\n\n${result.error}` : "",
+        ].filter(Boolean).join("\n"),
       }),
     );
 
     this.store.recordArtifact({
       id: `ART-${input.taskId}-${input.role}-r${input.round}-${Date.now()}`,
       taskId: input.taskId,
-      type: "agent_report",
+      type: result.needsHuman ? "human_intervention" : "agent_report",
       path: reportPath,
       createdBy: input.role,
     });
