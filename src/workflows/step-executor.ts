@@ -163,6 +163,7 @@ export class StepExecutor {
     const dependencySummary = dependencies.length > 0
       ? dependencies.map((dependency) => `- ${dependency.stepId}: ${dependency.outputRef ?? dependency.status}`).join("\n")
       : "No dependencies.";
+    const revisionFeedback = this.buildRevisionFeedbackSummary(step);
 
     if (step.action === "plan") {
       return [
@@ -212,6 +213,9 @@ export class StepExecutor {
         "",
         "## Dependency Outputs",
         dependencySummary,
+        "",
+        "## Prior Review Feedback",
+        revisionFeedback,
       ].join("\n");
     }
 
@@ -231,8 +235,33 @@ export class StepExecutor {
       "## Dependency Outputs",
       dependencySummary,
       "",
-      "Execute only this workflow step. Produce a clear step output and mention any artifacts created.",
+      "## Prior Review Feedback",
+      revisionFeedback,
+      "",
+      "Execute only this workflow step. If prior review feedback exists, address it directly before producing new output.",
     ].join("\n");
+  }
+
+  private buildRevisionFeedbackSummary(step: WorkflowStepRunRow): string {
+    const sections: string[] = [];
+    if (step.error) {
+      sections.push(["### Current Step Requeue Reason", trimLongFeedback(step.error, 2500)].join("\n\n"));
+    }
+
+    const reviews = this.options.store.listTaskReviews(step.taskId);
+    if (reviews.length > 0) {
+      sections.push(
+        reviews
+          .slice(-3)
+          .map((review) => [
+            `### Review Round ${review.round}: ${review.verdict}`,
+            trimLongFeedback(review.feedback, 2500),
+          ].join("\n\n"))
+          .join("\n\n"),
+      );
+    }
+
+    return sections.length > 0 ? sections.join("\n\n") : "No prior review feedback.";
   }
 
   private async captureReviewSafetyBefore(step: WorkflowStepRunRow): Promise<ReviewSafetySnapshot | undefined> {
