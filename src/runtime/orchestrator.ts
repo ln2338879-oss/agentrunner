@@ -262,7 +262,7 @@ export class Orchestrator {
           path: review.path,
           createdBy: "director",
         });
-        await this.notifier.reviewResult({ taskId, verdict: review.verdict, reviewPath: review.path, round });
+        await notifyReviewResult(this.notifier, { taskId, verdict: review.verdict, reviewPath: review.path, round, output: review.output });
 
         if (review.verdict === "APPROVED") {
           markPendingWorkflowSteps(this.store, taskId, workflowPlan, "skipped", "Workflow completed before optional steps were needed.");
@@ -280,11 +280,12 @@ export class Orchestrator {
             reviewPath: latestReviewPath,
             policyEngine,
           });
-          await this.notifier.approved({
+          await notifyApproved(this.notifier, {
             taskId,
             approvedPath,
             reportPath: latestReportPath,
             reviewPath: latestReviewPath,
+            output: result.result.output,
           });
           return {
             taskId,
@@ -405,11 +406,12 @@ export class Orchestrator {
         createdBy: input.role,
       });
     }
-    await this.notifier.workerReport({
+    await notifyWorkerReport(this.notifier, {
       taskId: input.taskId,
       role: input.role,
       reportPath,
       round: input.round,
+      output: result.output,
     });
 
     return { result, reportPath };
@@ -655,4 +657,20 @@ function appendSteeringContext(
     "",
     ...messages.map((message) => `- ${message.createdAt}: ${message.content}`),
   ].join("\n");
+}
+
+type WorkerReportTurnInput = Parameters<RuntimeNotifier["workerReport"]>[0] & { output?: string };
+type ReviewTurnInput = Parameters<RuntimeNotifier["reviewResult"]>[0] & { output?: string };
+type ApprovedTurnInput = Parameters<RuntimeNotifier["approved"]>[0] & { output?: string };
+
+async function notifyWorkerReport(notifier: RuntimeNotifier, input: WorkerReportTurnInput): Promise<void> {
+  await notifier.workerReport(input);
+}
+
+async function notifyReviewResult(notifier: RuntimeNotifier, input: ReviewTurnInput): Promise<void> {
+  await notifier.reviewResult(input);
+}
+
+async function notifyApproved(notifier: RuntimeNotifier, input: ApprovedTurnInput): Promise<void> {
+  await notifier.approved(input);
 }
