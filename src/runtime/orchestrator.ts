@@ -18,6 +18,17 @@ import { WorkflowRegistry } from "../workflows/engine";
 import type { PlannedWorkflowStep, WorkflowPlan } from "../workflows/types";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./types";
 
+export interface OrchestratorResult {
+  taskId: string;
+  assignedTo: AgentRole;
+  obsidianPath: string;
+  reportPath: string;
+  reviewPath?: string;
+  approvedPath?: string;
+  verdict?: ReviewVerdict;
+  finalOutput?: string;
+}
+
 export class Orchestrator {
   private readonly agents = new Map<AgentRole, AgentAdapter>();
   private notifier: RuntimeNotifier = new NullNotifier();
@@ -83,15 +94,7 @@ export class Orchestrator {
     content: string;
     discordMessageId?: string;
     discordChannelId?: string;
-  }): Promise<{
-    taskId: string;
-    assignedTo: AgentRole;
-    obsidianPath: string;
-    reportPath: string;
-    reviewPath?: string;
-    approvedPath?: string;
-    verdict?: ReviewVerdict;
-  }> {
+  }): Promise<OrchestratorResult> {
     const group = this.groupConfig?.resolveByChannel(input.discordChannelId) ?? null;
     const policyEngine = createPolicyEngine(group?.effectivePolicy);
     const skillContext = await loadSkillContext({
@@ -125,17 +128,9 @@ export class Orchestrator {
       throw new Error(`Role ${classified.assignedTo} is not allowed in group ${group.id}.`);
     }
 
-    if (classified.assignedTo === "builder") {
-      policyEngine.requireAllowed("code_changes");
-    }
-
-    if (classified.assignedTo === "factory") {
-      policyEngine.requireAllowed("content_generation");
-    }
-
-    if (classified.assignedTo === "designer") {
-      policyEngine.requireAllowed("image_generation");
-    }
+    if (classified.assignedTo === "builder") policyEngine.requireAllowed("code_changes");
+    if (classified.assignedTo === "factory") policyEngine.requireAllowed("content_generation");
+    if (classified.assignedTo === "designer") policyEngine.requireAllowed("image_generation");
 
     this.store.createTask({
       id: taskId,
@@ -238,6 +233,7 @@ export class Orchestrator {
             assignedTo: classified.assignedTo,
             obsidianPath,
             reportPath: latestReportPath,
+            finalOutput: result.result.output || result.result.error,
           };
         }
 
@@ -298,6 +294,7 @@ export class Orchestrator {
             reviewPath: latestReviewPath,
             approvedPath,
             verdict: latestVerdict,
+            finalOutput: result.result.output,
           };
         }
 
@@ -317,6 +314,7 @@ export class Orchestrator {
             reportPath: latestReportPath,
             reviewPath: latestReviewPath,
             verdict: latestVerdict,
+            finalOutput: result.result.output,
           };
         }
 
@@ -343,6 +341,7 @@ export class Orchestrator {
         reportPath: latestReportPath,
         reviewPath: latestReviewPath,
         verdict: latestVerdict ?? (latestResult?.ok ? "NEEDS_REVISION" : "BLOCKED"),
+        finalOutput: latestResult?.output,
       };
     } finally {
       this.store.releaseTaskLease({ taskId, owner: leaseOwner });
