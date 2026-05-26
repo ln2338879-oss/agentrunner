@@ -16,6 +16,7 @@ import { runShellCommand } from "../utils/command";
 import { appendVisionAnalysis } from "../vision/adapter";
 import { WorkflowRegistry } from "../workflows/engine";
 import type { PlannedWorkflowStep, WorkflowPlan } from "../workflows/types";
+import { runStartupRecovery } from "./startup-recovery";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./types";
 
 export interface OrchestratorResult {
@@ -63,30 +64,14 @@ export class Orchestrator {
     });
     await this.vault.ensureDefaultFolders();
 
-    if (this.config.RECOVER_STALE_TASKS_ON_START) {
-      const recovered = this.store.recoverStaleTasks({ staleMinutes: this.config.STALE_TASK_MINUTES });
-      if (recovered.length > 0) {
-        const recoveryPath = `08_Recovery/recovery-${Date.now()}.md`;
-        await this.vault.writeNote(
-          recoveryPath,
-          [
-            "---",
-            `created_at: ${new Date().toISOString()}`,
-            `stale_task_minutes: ${this.config.STALE_TASK_MINUTES}`,
-            "---",
-            "",
-            "# Startup Recovery Report",
-            "",
-            "The following stale running or revision tasks were marked as BLOCKED during startup recovery.",
-            "",
-            "| Task | Previous Status | Locked By |",
-            "|---|---|---|",
-            ...recovered.map((task) => `| ${task.id} | ${task.status} | ${task.lockedBy ?? ""} |`),
-            "",
-          ].join("\n"),
-        );
-        await this.notifier.recovery({ count: recovered.length, path: recoveryPath });
-      }
+    const recovery = await runStartupRecovery({
+      store: this.store,
+      vault: this.vault,
+      config: this.config,
+      owner: `orchestrator:${process.pid}`,
+    });
+    if (recovery.reportPath) {
+      await this.notifier.recovery({ count: recovery.recovered.length, path: recovery.reportPath });
     }
   }
 
