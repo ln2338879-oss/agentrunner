@@ -5,6 +5,7 @@ import { DirectorAgent } from "../agents/director";
 import { FactoryAgent } from "../agents/factory";
 import { RuntimeStore } from "../db/runtime-store";
 import { VaultManager } from "../obsidian/vault-manager";
+import { runStartupRecovery, startWorkerHeartbeat } from "../runtime/startup-recovery";
 import type { AgentAdapter, AgentRole } from "../runtime/types";
 import { WorkerPoller } from "./poller";
 
@@ -21,9 +22,32 @@ async function main(): Promise<void> {
   const vault = new VaultManager(config.OBSIDIAN_VAULT_PATH);
   await vault.ensureDefaultFolders();
 
+  const owner = `worker:${role}:${process.pid}`;
+  const stopHeartbeat = startWorkerHeartbeat({
+    store,
+    owner,
+    role,
+    config,
+    metadata: { mode: "isolated-worker" },
+  });
+  process.once("beforeExit", stopHeartbeat);
+  process.once("SIGINT", () => {
+    stopHeartbeat();
+    process.exit(130);
+  });
+  process.once("SIGTERM", () => {
+    stopHeartbeat();
+    process.exit(143);
+  });
+
+  const recovery = await runStartupRecovery({ store, vault, config, owner });
+  if (recovery.recovered.length > 0) {
+    console.log(`[worker:${role}] startup recovery ${recovery.mode}: ${recovery.recovered.length} interrupted step(s).`);
+  }
+
   const poller = new WorkerPoller({
     role,
-    owner: `worker:${role}:${process.pid}`,
+    owner,
     store,
     vault,
     agent,
@@ -37,6 +61,7 @@ async function main(): Promise<void> {
   if (config.WORKER_POLL_ONCE) {
     const result = await poller.pollOnce();
     console.log(`[worker:${role}] pollOnce result: ${JSON.stringify(result)}`);
+    stopHeartbeat();
     return;
   }
 

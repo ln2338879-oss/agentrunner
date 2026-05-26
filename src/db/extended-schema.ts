@@ -52,4 +52,51 @@ CREATE TABLE IF NOT EXISTS workflow_step_runs (
   updated_at TEXT NOT NULL,
   UNIQUE(task_id, step_id)
 );
+
+CREATE TABLE IF NOT EXISTS runtime_events (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  task_id TEXT,
+  step_id TEXT,
+  owner TEXT,
+  message TEXT NOT NULL,
+  metadata_json TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS worker_heartbeats (
+  owner TEXT PRIMARY KEY,
+  role TEXT NOT NULL,
+  pid INTEGER,
+  status TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  metadata_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status_assigned_created
+  ON tasks(status, assigned_to, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_task_runs_task_started
+  ON task_runs(task_id, started_at);
+
+CREATE INDEX IF NOT EXISTS idx_messages_task_created
+  ON messages(task_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_reviews_task_round
+  ON reviews(task_id, round, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_artifacts_task_created
+  ON artifacts(task_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_claim
+  ON workflow_step_runs(status, resolved_role_id, lock_expires_at, step_index);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_task_index
+  ON workflow_step_runs(task_id, step_index);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_events_task_created
+  ON runtime_events(task_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_seen
+  ON worker_heartbeats(last_seen_at);
 `;
