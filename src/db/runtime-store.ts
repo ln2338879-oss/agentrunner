@@ -356,6 +356,33 @@ export class RuntimeStore {
     });
   }
 
+  requeueWorkflowStepRun(input: {
+    taskId: string;
+    stepId: string;
+    reason?: string;
+    now?: string;
+  }): void {
+    const now = input.now ?? new Date().toISOString();
+    this.db.query(`
+      UPDATE workflow_step_runs
+      SET
+        status = 'pending',
+        locked_by = NULL,
+        lock_expires_at = NULL,
+        started_at = NULL,
+        finished_at = NULL,
+        output_ref = NULL,
+        error = $reason,
+        updated_at = $now
+      WHERE task_id = $taskId AND step_id = $stepId
+    `).run({
+      $taskId: input.taskId,
+      $stepId: input.stepId,
+      $reason: input.reason ?? null,
+      $now: now,
+    });
+  }
+
   getWorkflowStepRun(taskId: string, stepId: string): WorkflowStepRunRow | null {
     return this.workflowStepQuery("WHERE task_id = $taskId AND step_id = $stepId").get({
       $taskId: taskId,
