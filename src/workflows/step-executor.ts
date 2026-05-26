@@ -27,7 +27,7 @@ export interface StepExecutorResult {
   claimed: boolean;
   taskId?: string;
   stepId?: string;
-  status?: "completed" | "failed";
+  status?: "completed" | "failed" | "needs_human";
   reportPath?: string;
   verdict?: ReviewVerdict;
   error?: string;
@@ -55,11 +55,12 @@ export class StepExecutor {
       result = await this.applyReviewSafetyResult(step, result, reviewSafetyBefore);
       const output = result.output || result.error || "Step execution returned no output.";
       const reportPath = stepReportPath(step, this.options.role);
-      const status = result.ok ? "completed" : "failed";
+      const runStatus = result.ok ? "completed" : "failed";
+      const stepStatus: StepExecutorResult["status"] = result.ok ? "completed" : result.needsHuman ? "needs_human" : "failed";
       const verdict = isReviewAction(step.action) ? parseStepReviewVerdict(result, output) : undefined;
 
-      this.recordTaskRun({ step, prompt, result: { ...result, output }, status, startedAt });
-      await this.writeReport({ step, result: { ...result, output }, status, reportPath, verdict });
+      this.recordTaskRun({ step, prompt, result: { ...result, output }, status: runStatus, startedAt });
+      await this.writeReport({ step, result: { ...result, output }, status: runStatus, reportPath, verdict });
       this.recordArtifacts({ step, result, reportPath });
 
       if (result.ok) {
@@ -84,15 +85,36 @@ export class StepExecutor {
           outputRef: reportPath,
           error: result.error ?? "Step execution failed.",
         });
-        if (step.required) this.options.store.updateTaskStatus(step.taskId, "failed");
-        await this.notifyWorker({ step, output, reportPath });
+        if (result.needsHuman) {
+          this.options.store.updateTaskStatus(step.taskId, "needs_human");
+          this.options.store.recordRuntimeEvent({
+            kind: "human_intervention_required",
+            taskId: step.taskId,
+            stepId: step.stepId,
+            owner: this.options.owner,
+            message: result.error ?? "Provider requires human intervention.",
+            metadata: {
+              role: this.options.role,
+              errorKind: result.errorKind,
+              reportPath,
+            },
+          });
+          await this.options.notifier?.blocked({
+            taskId: step.taskId,
+            reviewPath: reportPath,
+            reason: result.error ?? "Provider requires human intervention.",
+          });
+        } else {
+          if (step.required) this.options.store.updateTaskStatus(step.taskId, "failed");
+          await this.notifyWorker({ step, output, reportPath });
+        }
       }
 
       return {
         claimed: true,
         taskId: step.taskId,
         stepId: step.stepId,
-        status,
+        status: stepStatus,
         reportPath,
         verdict,
         error: result.error,
@@ -347,16 +369,18 @@ export class StepExecutor {
       botReportNote({
         taskId: input.step.taskId,
         role: this.options.role,
-        status: input.status,
+        status: input.result.needsHuman ? "needs_human" : input.status,
         body: [
           `# Workflow Step: ${input.step.stepId}`,
           "",
           `Action: ${input.step.action}`,
           `Workflow: ${input.step.workflowId}`,
+          input.result.errorKind ? `Error kind: ${input.result.errorKind}` : "",
+          input.result.needsHuman ? "Human intervention required: true" : "",
           "",
           input.result.output,
           input.result.error ? `\n## Error\n\n${input.result.error}` : "",
-        ].join("\n"),
+        ].filter(Boolean).join("\n"),
       }),
     );
   }
@@ -369,7 +393,7 @@ export class StepExecutor {
     this.options.store.recordArtifact({
       id: `ART-${input.step.taskId}-${this.options.role}-${input.step.stepId}-${Date.now()}`,
       taskId: input.step.taskId,
-      type: isReviewAction(input.step.action) ? "workflow_step_review" : "workflow_step_report",
+      type: input.result.needsHuman ? "human_intervention" : isReviewAction(input.step.action) ? "workflow_step_review" : "workflow_step_report",
       path: input.reportPath,
       createdBy: this.options.role,
     });
@@ -513,6 +537,7 @@ export function claimRoleIdsForAgentRole(role: AgentRole): string[] {
 }
 
 function parseStepReviewVerdict(result: AgentRunResult, output: string): ReviewVerdict {
+  if (result.needsHuman) return "NEEDS_HUMAN";
   return result.ok ? parseReviewVerdict(output) : "BLOCKED";
 }
 
