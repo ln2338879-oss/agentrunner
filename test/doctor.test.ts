@@ -59,8 +59,9 @@ describe("runDoctor", () => {
   });
 
   test("fails when dashboard is exposed without a local bind address", async () => {
+    const baseEnv = await createEnv();
     const env = {
-      ...await createEnv(),
+      ...baseEnv,
       DASHBOARD_ENABLED: "true",
       DASHBOARD_HOST: "0.0.0.0",
     } satisfies NodeJS.ProcessEnv;
@@ -76,8 +77,9 @@ describe("runDoctor", () => {
   });
 
   test("fails slash command registration when client id is missing", async () => {
+    const baseEnv = await createEnv();
     const env = {
-      ...await createEnv(),
+      ...baseEnv,
       REGISTER_SLASH_COMMANDS: "true",
       DISCORD_CLIENT_ID: "",
     } satisfies NodeJS.ProcessEnv;
