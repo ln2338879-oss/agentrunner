@@ -3,13 +3,13 @@ import type { RuntimeStore, WorkflowStepRunRow } from "../db/runtime-store";
 import type { RuntimeNotifier } from "../discord/notifier";
 import { botReportNote, reviewNote } from "../obsidian/templates";
 import type { VaultManager } from "../obsidian/vault-manager";
-import { statusFromVerdict } from "../review/review-loop";
 import {
   buildReviewSafetyContext,
   captureReviewSafetySnapshot,
   compareReviewSafetySnapshots,
   type ReviewSafetySnapshot,
 } from "../review/review-safety";
+import { applyTerminalVerdictAction } from "../review/verdict-actions";
 import { parseReviewVerdict } from "../review/verdict";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "../runtime/types";
 
@@ -71,7 +71,7 @@ export class StepExecutor {
           outputRef: reportPath,
         });
         if (verdict) {
-          this.recordReviewVerdict({ step, verdict, output, reportPath });
+          await this.recordReviewVerdict({ step, verdict, output, reportPath });
           await this.notifyReview({ step, verdict, output, reportPath });
         } else {
           this.completeTaskIfDone(step.taskId);
@@ -409,12 +409,12 @@ export class StepExecutor {
     }
   }
 
-  private recordReviewVerdict(input: {
+  private async recordReviewVerdict(input: {
     step: WorkflowStepRunRow;
     verdict: ReviewVerdict;
     output: string;
     reportPath: string;
-  }): void {
+  }): Promise<void> {
     const round = nextReviewRound(this.options.store, input.step.taskId);
     this.options.store.recordReview({
       id: `REV-${input.step.taskId}-${input.step.stepId}-${round}-${Date.now()}`,
@@ -442,7 +442,17 @@ export class StepExecutor {
       return;
     }
 
-    this.options.store.updateTaskStatus(input.step.taskId, statusFromVerdict(input.verdict));
+    await applyTerminalVerdictAction({
+      store: this.options.store,
+      vault: this.options.vault,
+      notifier: this.options.notifier,
+      taskId: input.step.taskId,
+      verdict: input.verdict,
+      feedback: input.output,
+      reviewPath: input.reportPath,
+      owner: this.options.owner,
+      sourceStepId: input.step.stepId,
+    });
   }
 
   private requeueRevisionSteps(step: WorkflowStepRunRow, round: number, feedback: string): void {

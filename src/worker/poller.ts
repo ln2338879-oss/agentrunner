@@ -18,7 +18,7 @@ export interface WorkerPollResult {
   claimed: boolean;
   taskId?: string;
   stepId?: string;
-  status?: "completed" | "failed";
+  status?: "completed" | "failed" | "needs_human";
   reportPath?: string;
   error?: string;
 }
@@ -49,7 +49,8 @@ export class WorkerPoller {
         workspacePath: this.options.config.PROJECT_ROOT,
       });
 
-      const status = result.ok ? "completed" : "failed";
+      const status = result.ok ? "completed" : result.needsHuman ? "needs_human" : "failed";
+      const runStatus = result.ok ? "completed" : "failed";
       const reportPath = workerReportPath(task.id, this.options.role);
 
       this.options.store.recordTaskRun({
@@ -59,7 +60,7 @@ export class WorkerPoller {
         model: modelNameFor(this.options.role, this.options.config),
         prompt,
         output: result.output,
-        status,
+        status: runStatus,
         error: result.error,
         startedAt,
         finishedAt: new Date().toISOString(),

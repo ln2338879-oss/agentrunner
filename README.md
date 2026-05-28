@@ -1,240 +1,227 @@
 # AgentRunner
 
-AgentRunner는 Discord에서 요청을 받아 여러 AI 역할이 계획, 실행, 검토, 디자인 생성을 나눠 처리하는 **범용 멀티 에이전트 팀 런타임**입니다.
+AgentRunner는 Discord에서 받은 작업을 여러 AI 역할에게 나눠 맡기는 **멀티 에이전트 자동 작업 런타임**입니다.
 
-초기에는 게임 개발 자동화를 목표로 시작했지만, 현재 구조는 게임 전용이 아니라 개발, 문서/콘텐츠 생성, 디자인/이미지 생성, 리뷰, 중재, 운영 자동화까지 확장 가능한 범용 workflow runtime입니다.
-
-## 현재 상태
-
-AgentRunner는 이제 단순 MVP를 넘어 **기능형 베타 / 준프로덕션 런타임** 단계입니다.
-
-구현된 핵심은 다음과 같습니다.
+쉽게 말하면 다음 흐름을 자동화합니다.
 
 ```text
-Discord Director Bot
-→ task classification
-→ role registry
-→ workflow registry
-→ provider registry
-→ policy engine
-→ SQLite runtime state
-→ Obsidian artifact vault
-→ workflow step ledger
-→ ready-step claim
-→ StepExecutor
-→ StepScheduler loop
-→ Director review / arbitration
-→ dashboard visibility
+Discord에서 작업 요청
+→ Director가 작업 종류 판단
+→ Builder / Factory / Designer 중 알맞은 역할에게 전달
+→ 결과 생성
+→ Director가 리뷰
+→ 승인, 수정 요청, 사람 호출, 작업 분리 처리
+→ 결과를 Discord와 Obsidian Vault에 기록
 ```
 
-아직 완전한 프로덕션 플랫폼은 아닙니다. 남은 핵심은 human gate의 workflow step 정식 편입, revision requeue policy, provider retry/fallback 고도화, parallel DAG execution, dashboard control API입니다.
+처음에는 게임 개발 자동화를 목표로 만들었지만, 현재 구조는 게임 전용이 아닙니다. 코드 수정, 문서 작성, 데이터 정리, 이미지 생성, 리뷰, 작업 분리, 운영 자동화에 모두 사용할 수 있습니다.
 
-## 역할 구조
+---
 
-| 역할 | 기본 도구 | 목적 |
+## 1. AgentRunner가 하는 일
+
+### 역할별 작업 분담
+
+| 역할 | 기본 도구 | 하는 일 |
 |---|---|---|
-| Director | ClaudeCode | 계획, 리뷰, 중재, verdict 판단 |
-| Builder | Codex | 코드 구현, 수정, 테스트 |
-| Factory | Ollama/Gemma | 문서, 데이터, 콘텐츠 생성 |
-| Designer | Gemini image / Nano Banana 계열 | 이미지, 디자인, 시각 자료 생성 |
+| Director | Claude Code | 작업 분류, 계획, 리뷰, 승인/차단 판단 |
+| Builder | Codex | 코드 구현, 버그 수정, 테스트, 빌드 |
+| Factory | Ollama / 로컬 LLM | 문서, JSON, CSV, 아이템/몬스터 데이터 같은 콘텐츠 생성 |
+| Designer | Gemini Image | 이미지, 디자인, 픽셀아트, 시각 자료 생성 |
+
+전체 구조는 이렇습니다.
 
 ```text
 Discord User
   ↓
-Director Bot
+AgentRunner
+  ├─ SQLite DB                 # 작업 상태 저장
+  ├─ Obsidian Vault            # 결과 Markdown 파일 저장
+  ├─ Router                    # 작업 분류
+  ├─ Workflow Engine           # plan → work → review 흐름 관리
+  ├─ Step Scheduler            # 실행 가능한 step 자동 처리
+  ├─ Director                  # 계획 / 리뷰 / 중재
+  ├─ Builder                   # 코드 작업
+  ├─ Factory                   # 콘텐츠 생성
+  └─ Designer                  # 이미지 생성
   ↓
-AgentRunner Runtime
-  ├─ SQLite Runtime DB
-  ├─ Obsidian Vault
-  ├─ Role Registry
-  ├─ Workflow Registry
-  ├─ Provider Registry
-  ├─ Policy Engine
-  ├─ StepScheduler
-  ├─ Director / Planner / Reviewer / Arbiter
-  ├─ Builder / Codex
-  ├─ Factory / Ollama
-  └─ Designer / Gemini Image
-  ↓
-Discord Result + Obsidian Artifacts + Dashboard
+Discord 알림 + Obsidian 결과물
 ```
 
-## 구현된 기능
+---
 
-### Discord Runtime
+## 2. 설치 전 필요한 것
 
-- Director / Builder / Factory / Designer worker 구조
-- Discord text commands
-- Discord slash commands
-- Discord 첨부파일 저장
-- Discord 채널별 notification
-- `!steer` 기반 mid-turn steering
-- 채널별 session context 주입
-- 디자인 요청 중 사용자의 의견/선택/취향 판단이 필요한 경우 작성자 Discord mention 후 진행 보류
+### 필수 프로그램
 
-### 작업 관리
+AgentRunner를 실행하려면 아래 프로그램이 필요합니다.
 
-- SQLite WAL 런타임 DB
-- tasks / task_runs / messages / reviews / artifacts
-- sessions / attachments / steering 확장 스키마
-- task lease
-- stale task recovery
-- Director verdict 기반 승인/차단
-- NEEDS_REVISION revision loop
-- workflow step ledger
-- workflow step lease
-- ready-step dependency gating
-- step-level outputRef / error / timestamps
+| 항목 | 필요 여부 | 설명 |
+|---|---:|---|
+| Git | 필수 | GitHub 저장소 다운로드와 브랜치 관리 |
+| Bun | 필수 | 프로젝트 실행, 테스트, 패키지 설치 |
+| Node.js 20 LTS 이상 | 권장/거의 필수 | 일부 Node 생태계 도구 호환용 |
+| SQLite | 내장 사용 | `bun:sqlite` 사용. 별도 DB 서버는 필요 없음 |
+| Discord Bot Token | Discord 연동 시 필수 | 봇을 Discord 서버에 연결할 때 필요 |
+| Ubuntu 또는 Windows | 필수 | 둘 중 하나에서 실행 가능. 서버 운영은 Ubuntu 권장 |
 
-### Workflow Engine
+버전 확인:
 
-- role registry
-- workflow registry
-- provider registry
-- workflow routing metadata
-- workspace/profile config
-- policy engine
-- workflow step execution ledger
-- ready step claim
-- StepExecutor
-- StepScheduler loop
-- Director planner/reviewer/arbiter step 독립 실행
-- Builder / Factory / Designer step 독립 실행
+```bash
+git --version
+bun --version
+node -v
+npm -v
+```
 
-기본 flow 예시:
+### Ubuntu 서버 권장 패키지
+
+Ubuntu에서 운영할 경우 기본적으로 아래를 설치하는 것을 권장합니다.
+
+```bash
+sudo apt update
+sudo apt install -y git curl unzip build-essential sqlite3
+```
+
+Bun 설치:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+설치 후 터미널을 다시 열거나 다음을 실행합니다.
+
+```bash
+source ~/.bashrc
+```
+
+### Windows 권장 설치
+
+Windows에서 테스트할 경우 아래를 권장합니다.
 
 ```text
-planner → builder/factory/designer → reviewer → optional arbiter
+Git for Windows
+Bun
+Node.js 20 LTS 이상
+Windows Terminal
+PowerShell 7
 ```
 
-Scheduler 기본 sweep:
+Bun 설치 PowerShell 예시:
+
+```powershell
+powershell -c "irm bun.sh/install.ps1 | iex"
+```
+
+패키지 빌드 문제가 생기면 Visual Studio Build Tools가 필요할 수 있습니다.
 
 ```text
-director → builder → factory → designer → director
+Visual Studio Build Tools
+- Desktop development with C++
+- Windows 10/11 SDK 또는 Windows 11 SDK
 ```
 
-이 순서 덕분에 단일 cycle에서 다음 흐름을 처리할 수 있습니다.
+---
+
+## 3. 권장 컴퓨터 사양
+
+### AgentRunner만 실행하는 경우
+
+Claude Code, Codex, Gemini API, 외부 Ollama 서버를 붙이고 AgentRunner 자체만 돌리는 기준입니다.
+
+| 구분 | 최소 | 권장 |
+|---|---:|---:|
+| CPU | 4코어 | 6~8코어 이상 |
+| RAM | 8GB | 16GB~32GB |
+| 저장공간 | 20GB | 100GB 이상 SSD |
+| OS | Windows 10/11 또는 Ubuntu | Ubuntu 22.04/24.04 서버 권장 |
+
+### Ollama 로컬 LLM까지 같은 컴퓨터에서 돌리는 경우
+
+로컬 LLM을 같이 돌리면 GPU와 RAM이 중요합니다.
+
+| 구분 | 권장 |
+|---|---:|
+| CPU | 6~8코어 이상 |
+| RAM | 32GB 이상 |
+| GPU | NVIDIA GPU 권장 |
+| VRAM | 최소 8GB, 권장 12~16GB 이상 |
+| 저장공간 | 100GB 이상 SSD |
+
+예를 들어 아래 사양이면 AgentRunner + Discord 봇 + Ollama 보조 모델 운영에 꽤 적합합니다.
 
 ```text
-plan → build/design/generate → review
+Ryzen 7 7700
+RTX 5060 Ti 16GB
+DDR5 RAM 32GB
+NVMe SSD 1TB
 ```
 
-### Designer / Gemini Image
+---
 
-- Designer role 추가
-- Gemini image provider 연결
-- `GEMINI_API_KEY`
-- `GEMINI_IMAGE_MODEL`
-- Discord 첨부 이미지 `local_path` 추출
-- Gemini `inlineData` 참조 이미지 전달
-- 생성 이미지 artifact 저장
-- `design_image` artifact 기록
-- 디자인 요청 중 주관적 선택/취향 판단이 필요한 경우 작업 생성 전에 작성자 mention
+## 4. 빠른 시작
 
-예시:
-
-```text
-픽셀아트 아이콘 만들어줘                → 자동 진행
-첨부 이미지 스타일로 캐릭터 만들어줘     → 자동 진행
-로고 시안 중 하나 골라줘                 → 작성자 mention 후 방향 확정 요청
-어떤 게 더 좋아?                         → 작성자 mention 후 방향 확정 요청
-```
-
-### AI Adapter / Provider
-
-- ClaudeCode CLI adapter
-- Codex CLI adapter
-- Ollama OpenAI-compatible adapter
-- Gemini image provider
-- Factory endpoint/model failover
-- CLI command failover
-- Claude/Codex profile 후보 로테이션
-
-### 멀티모달 / 웹 컨텍스트
-
-- Discord 첨부파일 로컬 저장
-- 이미지 `local_path` 프롬프트 주입
-- DesignerAgent 참조 이미지 처리
-- `VISION_COMMAND` 기반 이미지 분석
-- OpenAI vision 예시 스크립트
-- Gemini vision 예시 스크립트
-- `BROWSER_COMMAND` 기반 URL context 주입
-- `scripts/browser-fetch.ts` 기본 예시
-
-### Dashboard
-
-- runtime status dashboard
-- task list
-- task detail JSON
-- task timeline
-- workflow step status count
-- workflow step timeline event
-- artifacts / reviews / runs 조회
-
-### 운영 / 배포
-
-- `bun run setup`
-- `bun run setup:check`
-- `bun run setup:local`
-- `bun run setup:ubuntu`
-- `bun run setup:systemd`
-- `bun run setup:vps`
-- `bun run doctor`
-- `bun run proof`
-- `bun run dashboard`
-- `bun run worker`
-- `bun run scheduler`
-- `bun run scheduler:once`
-- systemd service template
-- worker systemd template
-- PM2 ecosystem template
-- GitHub Actions quality gate
-- runtime proof workflow
-
-## 빠른 시작
+저장소 다운로드:
 
 ```bash
 git clone https://github.com/ln2338879-oss/agentrunner.git
 cd agentrunner
+```
+
+패키지 설치:
+
+```bash
 bun install
+```
+
+환경 파일 생성:
+
+```bash
 cp .env.example .env
 ```
 
-로컬에서 내부 런타임 증명을 먼저 생성할 수 있습니다. 이 명령은 Discord 토큰이나 Claude/Codex/Ollama 인증 없이 SQLite, Obsidian Vault, worker queue polling, artifact 생성을 검증합니다.
+기본 검증:
+
+```bash
+bun run doctor
+bun test
+```
+
+외부 인증 없이 내부 런타임만 증명하려면:
 
 ```bash
 bun run proof
 ```
 
-setup runner를 사용할 수도 있습니다.
+Discord 없이도 SQLite, Obsidian Vault, task 생성, worker report artifact 생성을 확인할 수 있습니다.
 
-```bash
-bun run setup
-bun run setup:check
-bun run setup:local
-bun run setup:ubuntu
-bun run setup:systemd
-bun run setup:vps
-```
+---
 
-`.env`에 최소값을 설정합니다.
+## 5. `.env` 기본 설정
+
+최소 설정 예시:
 
 ```env
+# Discord
 DIRECTOR_DISCORD_TOKEN=PASTE_TOKEN_HERE
 GAME_DIRECTOR_CHANNEL_ID=PASTE_CHANNEL_ID_HERE
 
+# Runtime paths
 DATABASE_PATH=./data/agentrunner.sqlite
 OBSIDIAN_VAULT_PATH=./vault/AgentRunnerVault
 PROJECT_ROOT=./game-project
 ATTACHMENTS_DIR=./data/attachments
 
+# AI commands
 CLAUDE_CODE_COMMAND=claude
 CODEX_COMMAND=codex
+
+# Ollama / Factory
 OLLAMA_BASE_URL=http://localhost:11434/v1
 OLLAMA_MODEL=gemma
 ```
 
-Designer / Gemini image generation을 사용하려면 다음을 추가합니다.
+Designer 이미지 생성을 쓸 경우:
 
 ```env
 GEMINI_API_KEY=PASTE_GEMINI_API_KEY_HERE
@@ -242,39 +229,64 @@ GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview
 DESIGNER_OUTPUT_DIR=./vault/AgentRunnerVault/06_DesignerOutputs
 ```
 
-서버 상태를 확인합니다.
+운영 안정성 관련 기본값:
 
-```bash
-bun run doctor
+```env
+TASK_LEASE_MINUTES=30
+RECOVER_STALE_TASKS_ON_START=true
+STARTUP_RECOVERY_MODE=requeue
+STALE_TASK_MINUTES=120
+WORKER_HEARTBEAT_INTERVAL_MS=30000
+MAX_REVIEW_ROUNDS=3
 ```
 
-일반 실행:
+---
+
+## 6. 실행 명령어
 
 ```bash
-bun run start
-```
-
-개발 모드:
-
-```bash
-bun run dev
-```
-
-## 실행 명령어
-
-```bash
-bun run start          # Discord AgentRunner runtime
-bun run dashboard      # Standalone dashboard server
-bun run doctor         # Runtime environment check
-bun run proof          # Local runtime proof generator
-bun run worker         # Isolated role worker
-bun run scheduler      # Continuous workflow step scheduler
-bun run scheduler:once # Run one scheduler cycle
-bun run quality:check  # typecheck + lint + format check + test
+bun run start          # Discord AgentRunner 실행
+bun run dev            # 개발 모드 실행
+bun run doctor         # 환경 점검
+bun run proof          # 로컬 런타임 증명 생성
+bun run worker         # 역할별 worker 실행
+bun run scheduler      # workflow step scheduler 실행
+bun run scheduler:once # scheduler 1회 실행
+bun run dashboard      # dashboard 실행
+bun run quality:check  # typecheck + lint + format + test
 bun run build          # TypeScript build
 ```
 
-## Discord 명령어
+역할별 worker 실행 예시:
+
+```bash
+AGENTRUNNER_WORKER_ROLE=director bun run worker
+AGENTRUNNER_WORKER_ROLE=builder bun run worker
+AGENTRUNNER_WORKER_ROLE=factory bun run worker
+AGENTRUNNER_WORKER_ROLE=designer bun run worker
+```
+
+1회만 검증:
+
+```bash
+AGENTRUNNER_WORKER_ROLE=builder WORKER_POLL_ONCE=true bun run worker
+```
+
+Scheduler 실행:
+
+```bash
+bun run scheduler
+```
+
+Scheduler 1회 실행:
+
+```bash
+bun run scheduler:once
+```
+
+---
+
+## 7. Discord 명령어
 
 Text command:
 
@@ -296,125 +308,279 @@ Slash command:
 /run prompt:작업 요청
 ```
 
-일반 메시지는 새 작업으로 생성됩니다.
+일반 메시지를 보내도 새 작업으로 생성됩니다.
 
-## Slash command 등록
+---
 
-`.env`에 다음 값을 설정합니다.
+## 8. 현재 구현된 주요 기능
 
-```env
-DISCORD_CLIENT_ID=
-DISCORD_GUILD_ID=
-REGISTER_SLASH_COMMANDS=true
-```
+### 작업 분류 Router
 
-`DISCORD_GUILD_ID`를 비워두면 global command로 등록됩니다. 개발 중에는 guild command가 반영이 빠릅니다.
+기존에는 단순 키워드 순서로 작업을 분류했습니다.
 
-## Worker Bots
+이제는 역할별 점수를 계산합니다.
 
-Builder, Factory, Designer worker bot까지 로그인하려면 다음 값을 추가합니다.
-
-```env
-BUILDER_DISCORD_TOKEN=
-FACTORY_DISCORD_TOKEN=
-DESIGNER_DISCORD_TOKEN=
-DEV_TASKS_CHANNEL_ID=
-CONTENT_FACTORY_CHANNEL_ID=
-DESIGN_TASKS_CHANNEL_ID=
-REVIEW_LOG_CHANNEL_ID=
-BUILD_LOG_CHANNEL_ID=
-```
-
-## StepScheduler
-
-StepScheduler는 ready workflow step을 계속 찾아 실행합니다.
-
-```bash
-bun run scheduler
-```
-
-1회 cycle만 실행하려면:
-
-```bash
-bun run scheduler:once
-```
-
-환경 변수:
-
-```env
-STEP_SCHEDULER_INTERVAL_MS=5000
-STEP_SCHEDULER_MAX_STEPS_PER_CYCLE=20
-STEP_SCHEDULER_ONCE=false
-```
-
-## Group / Skill 설정
-
-채널별 프로젝트, 허용 역할, 정책, skill 목록을 설정할 수 있습니다.
-
-```bash
-cp configs/groups.example.yaml configs/groups.yaml
+```text
+builder 점수
+factory 점수
+designer 점수
+director 점수
 ```
 
 예시:
 
-```yaml
-groups:
-  - id: default-workspace
-    name: Default Workspace
-    discordChannelIds:
-      - "000000000000000000"
-    projectRoot: /opt/projects/default
-    obsidianVaultPath: /opt/obsidian-vaults/AgentRunnerVault
-    factoryModel: gemma
-    allowedRoles:
-      - director
-      - builder
-      - factory
-      - designer
-    defaultWorkflow: plan-build-review
-    skills:
-      - default
-      - code-style
-    policy:
-      allowCodeChanges: true
-      allowContentGeneration: true
-      allowImageGeneration: true
-      requireDirectorReview: true
+```text
+이미지 처리 버그 수정해줘
+→ 이미지라는 단어가 있어도 designer가 아니라 builder로 라우팅
+
+NPC 생성 시스템 코드 고쳐줘
+→ NPC라는 단어가 있어도 factory가 아니라 builder로 라우팅
+
+몬스터 스탯을 CSV로 정리해줘
+→ factory로 라우팅
+
+게임 에셋 구조를 분석하고 이미지와 CSV까지 정리해줘
+→ 애매하므로 director로 라우팅
 ```
 
-`SKILLS_DIR` 아래에는 자동으로 주입할 Markdown skill 문서를 둡니다.
+분류 결과에는 이유도 남습니다.
 
 ```text
-skills/default.md
-skills/code-style.md
-skills/item-schema.md
+confidence
+scores
+signals
+ambiguity
 ```
 
-## 첨부파일 / Vision / Designer reference images
+### Workflow 실행
 
-Discord 메시지에 파일이나 이미지를 첨부하면 AgentRunner가 파일을 저장하고 프롬프트에 정보를 추가합니다.
+기본 흐름:
 
 ```text
-filename
-url
-content_type
-size_bytes
-kind
-local_path
-skipped_reason
+plan → build/design/generate → review → optional arbiter
 ```
 
-저장 위치:
+예시:
+
+```text
+Director가 계획
+→ Builder가 코드 수정
+→ Director가 리뷰
+→ 승인 또는 수정 요청
+```
+
+StepScheduler는 실행 가능한 step을 찾아 자동으로 처리합니다.
+
+```text
+director → builder → factory → designer → director
+```
+
+### Director Review Verdict
+
+Director는 리뷰 결과를 아래 중 하나로 냅니다.
+
+```text
+VERDICT: APPROVED
+VERDICT: NEEDS_REVISION
+VERDICT: BLOCKED
+VERDICT: NEEDS_HUMAN
+VERDICT: SPLIT_TASK
+VERDICT: RETRY_WITH_DIFFERENT_AGENT
+```
+
+처리 방식:
+
+| Verdict | 처리 |
+|---|---|
+| APPROVED | 작업 승인 |
+| NEEDS_REVISION | 이전 worker step과 review step을 다시 pending으로 돌림 |
+| BLOCKED | 작업 차단 |
+| NEEDS_HUMAN | 사람이 확인해야 하는 작업으로 표시 |
+| SPLIT_TASK | 하위 planning task 생성 |
+| RETRY_WITH_DIFFERENT_AGENT | 자동 전환하지 않고 사람 개입으로 처리 |
+
+### Revision Loop
+
+리뷰가 수정 요청을 내면:
+
+```text
+VERDICT: NEEDS_REVISION
+→ build/design/generate step 다시 pending
+→ review step 다시 pending
+→ 다음 실행 때 이전 리뷰 피드백을 worker 프롬프트에 포함
+```
+
+즉, Builder가 같은 실수를 반복하지 않도록 이전 리뷰 피드백이 자동으로 들어갑니다.
+
+### Review Safety Guard
+
+리뷰어는 코드를 직접 고치면 안 됩니다.
+
+그래서 review/arbitrate step에는 read-only guard가 들어갑니다.
+
+```text
+review 시작 전 git 상태 저장
+→ review 실행
+→ git 상태 다시 확인
+→ 파일 변경이 있으면 READ_ONLY_VIOLATION 처리
+```
+
+리뷰어가 직접 파일을 수정하면 step은 실패합니다.
+
+### Terminal Verdict Actions
+
+예전에는 `SPLIT_TASK`, `NEEDS_HUMAN`, `RETRY_WITH_DIFFERENT_AGENT`가 상태만 바꾸고 멈췄습니다.
+
+이제는 실제 액션을 수행합니다.
+
+```text
+NEEDS_HUMAN
+→ 04_Reviews/<task>-needs_human-action.md 생성
+→ human_intervention artifact 기록
+→ task status = needs_human
+
+RETRY_WITH_DIFFERENT_AGENT
+→ 다른 모델로 자동 전환하지 않음
+→ 사람이 판단하도록 needs_human 처리
+
+SPLIT_TASK
+→ 리뷰 피드백에서 하위 작업 후보 추출
+→ child planning task 생성
+→ parent task status = split_task
+```
+
+### Provider Issue → Human Escalation
+
+Claude Code, Codex, Gemini, Ollama, Factory CLI 실행 중 계정/세션/사용량/인증 문제로 보이는 오류가 나오면 자동으로 다른 모델로 바꾸지 않습니다.
+
+대신:
+
+```text
+needsHuman = true
+errorKind 기록
+human_intervention artifact 생성
+task status = needs_human
+```
+
+분류 종류:
+
+```text
+auth
+session_expired
+rate_limit
+usage_limit
+timeout
+network
+validation
+unknown
+```
+
+이 중 아래는 사람 확인이 필요한 문제로 처리됩니다.
+
+```text
+auth
+session_expired
+rate_limit
+usage_limit
+```
+
+### Startup Recovery
+
+프로세스가 꺼지거나 서버가 재시작되었을 때 running 상태로 남은 workflow step을 복구합니다.
+
+```text
+STARTUP_RECOVERY_MODE=requeue
+```
+
+이면:
+
+```text
+stale running step
+→ pending으로 되돌림
+→ 다음 scheduler/worker가 다시 실행 가능
+```
+
+```text
+STARTUP_RECOVERY_MODE=block
+```
+
+이면:
+
+```text
+stale running step
+→ failed 처리
+→ task blocked 처리
+```
+
+복구 보고서는 Obsidian Vault에 저장됩니다.
+
+```text
+08_Recovery/startup-recovery-*.md
+```
+
+### Worker Heartbeat
+
+worker와 scheduler가 살아 있는지 DB에 기록합니다.
+
+```text
+worker_heartbeats
+```
+
+기본 주기:
+
+```env
+WORKER_HEARTBEAT_INTERVAL_MS=30000
+```
+
+### DB 안정성 개선
+
+SQLite DB에 주요 index가 추가되었습니다.
+
+```text
+tasks status/assigned index
+workflow step claim index
+reviews task/round index
+artifacts task index
+runtime events index
+worker heartbeat index
+```
+
+또한 task claim과 workflow step claim은 transaction으로 묶었습니다.
+
+```text
+transaction {
+  SELECT candidate
+  UPDATE claim
+  record runtime event
+}
+```
+
+동시에 여러 worker가 같은 작업을 잡으려 할 때 중복 실행 위험을 줄입니다.
+
+### Designer / Gemini Image
+
+Designer는 Gemini image API를 사용합니다.
+
+가능한 작업:
+
+```text
+픽셀아트 캐릭터 생성
+아이콘 제작
+로고 시안 생성
+첨부 이미지를 참고한 디자인 생성
+```
+
+Discord에 첨부된 이미지는 로컬에 저장되고, Designer가 Gemini 요청에 reference image로 전달할 수 있습니다.
+
+### Attachment / Vision / Browser Context
+
+Discord 첨부파일은 로컬에 저장됩니다.
 
 ```text
 ATTACHMENTS_DIR/<discord-message-id>/
 ```
 
-DesignerAgent는 이미지 첨부의 `local_path`를 찾아 Gemini 요청에 참조 이미지로 전달합니다.
-
-Vision command를 설정하면 이미지 분석 결과가 `# Vision Analysis`로 프롬프트에 추가됩니다.
-
-OpenAI 예시:
+이미지 분석 command를 설정하면 프롬프트에 vision 분석 결과가 추가됩니다.
 
 ```env
 VISION_COMMAND=bun scripts/vision-openai.ts
@@ -422,7 +588,7 @@ OPENAI_API_KEY=...
 OPENAI_VISION_MODEL=gpt-4.1-mini
 ```
 
-Gemini 예시:
+또는 Gemini vision:
 
 ```env
 VISION_COMMAND=bun scripts/vision-gemini.ts
@@ -430,44 +596,40 @@ GEMINI_API_KEY=...
 GEMINI_VISION_MODEL=gemini-2.5-flash
 ```
 
-## Browser Context
-
-요청에 URL이 포함되어 있고 `BROWSER_COMMAND`가 설정되어 있으면 URL 요약 결과가 `# Browser Context`로 프롬프트에 추가됩니다.
+URL context를 붙이려면:
 
 ```env
 BROWSER_COMMAND=bun scripts/browser-fetch.ts
 BROWSER_COMMAND_TIMEOUT_MS=300000
 ```
 
-## Failover / Profile Rotation
+---
 
-ClaudeCode, Codex, Factory command 후보를 순서대로 시도할 수 있습니다.
+## 9. Obsidian Vault 구조
 
-```env
-ENABLE_AGENT_FAILOVER=true
+AgentRunner는 Obsidian 앱을 직접 제어하지 않습니다. 지정한 Vault 폴더에 Markdown 파일을 생성합니다.
 
-CLAUDE_CODE_COMMAND=claude
-CLAUDE_CODE_COMMANDS=claude --profile backup||claude --profile fallback
-
-CODEX_COMMAND=codex
-CODEX_COMMANDS=codex --profile backup
-
-FACTORY_COMMANDS=
+```text
+AgentRunnerVault/
+  00_Inbox/
+  01_Tasks/
+  02_GameDesign/
+  03_Content/
+  04_Reviews/
+  05_BuilderReports/
+  06_FactoryOutputs/
+  06_DesignerOutputs/
+  07_Approved/
+  08_Recovery/
+  90_Prompts/
+  99_System/
 ```
 
-Factory는 Ollama endpoint/model fallback도 지원합니다.
+---
 
-```env
-OLLAMA_BASE_URL=http://localhost:11434/v1
-OLLAMA_BASE_URLS=http://127.0.0.1:11434/v1||http://backup-host:11434/v1
+## 10. Dashboard
 
-OLLAMA_MODEL=gemma
-OLLAMA_MODELS=llama3.1||mistral
-```
-
-## Dashboard
-
-Dashboard는 Discord runtime과 분리된 별도 프로세스로 실행합니다.
+Dashboard는 별도 프로세스로 실행합니다.
 
 ```bash
 bun run dashboard
@@ -492,67 +654,63 @@ GET /api/tasks/:taskId/timeline
 GET /
 ```
 
-## Worker Process Isolation
+주의: 현재 dashboard 인증은 아직 없습니다. 외부에 공개하지 말고 기본값처럼 `127.0.0.1`에 묶어두는 것을 권장합니다.
 
-역할별 worker entrypoint가 있습니다. worker는 먼저 ready workflow step을 claim하고, 없으면 legacy pending task queue로 fallback합니다.
+---
 
-```bash
-AGENTRUNNER_WORKER_ROLE=director bun run worker
-AGENTRUNNER_WORKER_ROLE=builder bun run worker
-AGENTRUNNER_WORKER_ROLE=factory bun run worker
-AGENTRUNNER_WORKER_ROLE=designer bun run worker
-```
+## 11. Ubuntu 서버 배포
 
-1회 검증:
-
-```bash
-AGENTRUNNER_WORKER_ROLE=builder WORKER_POLL_ONCE=true bun run worker
-```
-
-systemd template:
+포함된 systemd 템플릿:
 
 ```text
+deploy/systemd/agentrunner.service
 deploy/systemd/agentrunner-worker@.service
 ```
 
-## Obsidian Vault 구조
+setup 명령:
 
-AgentRunner는 Obsidian 앱을 직접 제어하지 않습니다. Vault 폴더에 Markdown 파일을 생성합니다.
-
-```text
-AgentRunnerVault/
-  00_Inbox/
-  01_Tasks/
-  02_GameDesign/
-  03_Content/
-  04_Reviews/
-  05_BuilderReports/
-  06_FactoryOutputs/
-  06_DesignerOutputs/
-  07_Approved/
-  08_Recovery/
-  90_Prompts/
-  99_System/
+```bash
+bun run setup
+bun run setup:check
+bun run setup:ubuntu
+bun run setup:systemd
+bun run setup:vps
 ```
 
-## Review Verdicts
+서버에서 일반적인 순서:
 
-Director review / arbitration step은 다음 verdict 중 하나를 반환해야 합니다.
-
-```text
-VERDICT: APPROVED
-VERDICT: NEEDS_REVISION
-VERDICT: BLOCKED
-VERDICT: NEEDS_HUMAN
-VERDICT: SPLIT_TASK
-VERDICT: RETRY_WITH_DIFFERENT_AGENT
+```bash
+git clone https://github.com/ln2338879-oss/agentrunner.git
+cd agentrunner
+bun install
+cp .env.example .env
+bun run doctor
+bun run start
 ```
 
-`NEEDS_REVISION`이면 기존 Orchestrator loop에서는 Director 피드백을 포함한 수정 프롬프트를 만들고 같은 worker를 다시 실행합니다. 독립 StepScheduler 경로에서는 revision requeue policy가 후속 작업으로 남아 있습니다.
+systemd를 쓸 경우:
 
-## Approved Task PR Workflow
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable agentrunner
+sudo systemctl start agentrunner
+sudo systemctl status agentrunner
+```
 
-승인된 작업을 PR 흐름으로 연결할 수 있습니다.
+역할별 worker를 systemd로 분리할 수도 있습니다.
+
+```text
+agentrunner-worker@director
+agentrunner-worker@builder
+agentrunner-worker@factory
+agentrunner-worker@designer
+```
+
+---
+
+## 12. GitHub / PR Workflow
+
+승인된 작업을 GitHub PR 생성 흐름으로 연결할 수 있습니다.
 
 ```env
 APPROVED_TASK_COMMAND=bash scripts/trigger-approved-task-workflow.sh
@@ -569,35 +727,14 @@ gh workflow run approved-task-pr.yml \
   -f draft=true
 ```
 
-## 서버 배포
+---
 
-포함된 배포 템플릿:
+## 13. 품질 검사
 
-```text
-deploy/systemd/agentrunner.service
-deploy/systemd/agentrunner-worker@.service
-deploy/pm2/ecosystem.config.cjs
-```
-
-배포 문서:
-
-```text
-docs/deployment.md
-docs/operations-hardening.md
-docs/doctor-and-vision.md
-docs/advanced-runtime.md
-docs/setup-and-proof.md
-docs/workflow-step-executor.md
-docs/designer-gemini.md
-```
-
-## 품질 게이트
-
-로컬 검사:
+전체 검사:
 
 ```bash
 bun run quality:check
-bun run build
 ```
 
 개별 검사:
@@ -610,69 +747,38 @@ bun test
 bun run build
 ```
 
-GitHub Actions의 `AgentRunner Quality Gate` workflow는 PR과 main push마다 install, typecheck, lint, format check, test, build를 실행합니다.
+GitHub Actions의 quality gate는 PR과 main push마다 install, typecheck, lint, format check, test, build를 실행합니다.
 
-`AgentRunner Runtime Proof` workflow는 내부 런타임 proof를 검증합니다.
+---
 
-## Runtime Proof 만들기
+## 14. 현재 한계
 
-외부 인증 없이 내부 런타임 증명 파일을 만들 수 있습니다.
+아직 완전한 프로덕션 플랫폼은 아닙니다.
 
-```bash
-bun run proof
-```
-
-이 명령은 다음을 검증하고 `docs/proof/runtime-proof.md`를 생성합니다.
+현재 남은 주요 한계:
 
 ```text
-Doctor internal path checks
-SQLite database creation
-Obsidian Vault folder creation
-sample task creation
-worker queue polling
-worker report artifact creation
-task completed status
+parallel DAG execution은 아직 미완성
+Dashboard 인증 없음
+구조화 로깅 미흡
+task별 git worktree 격리 미구현
+voice transcription 미구현
+headless browser daemon 미구현
+LICENSE 파일 별도 추가 필요
 ```
 
-실제 Discord까지 포함한 증거를 남기려면 서버에서 다음 순서로 실행합니다.
-
-```bash
-bun install
-bun run doctor
-bun run start
-```
-
-Discord에서 테스트 작업을 생성합니다.
+운영 안정성 기준으로 다음 보강 우선순위는 다음과 같습니다.
 
 ```text
-/run prompt: 테스트용 콘텐츠를 만들고 Director가 리뷰해줘
+1. task별 git worktree 격리
+2. 구조화 로깅
+3. Dashboard 인증
+4. parallel DAG execution
 ```
 
-성공 기준:
+---
 
-```text
-Discord 봇 로그인 성공
-Task 생성 성공
-Workflow step 생성
-Worker 또는 scheduler 실행 성공
-Director review 생성
-Obsidian Vault에 결과 파일 생성
-Discord 응답 반환
-```
-
-민감정보를 제거한 로그는 `docs/proof/` 아래에 남기는 것을 권장합니다.
-
-## 현재 한계
-
-- human gate는 아직 workflow step으로 정식 편입되지 않았습니다.
-- StepScheduler는 single-process sequential scheduler입니다. parallel DAG execution은 후속 작업입니다.
-- 독립 StepScheduler 경로의 revision requeue policy는 후속 작업입니다.
-- retry with different provider/agent 정책은 더 고도화가 필요합니다.
-- browser command는 기본 fetch 예시이며 headless Chromium daemon은 아닙니다.
-- voice transcription은 아직 구현되지 않았습니다.
-- LICENSE 파일은 별도로 추가해야 합니다.
-
-## 보안 주의
+## 15. 보안 주의
 
 절대 커밋하면 안 되는 것:
 
@@ -681,8 +787,38 @@ Discord 응답 반환
 Discord bot token
 OpenAI API key
 Gemini API key
-Claude/Codex 인증 토큰
+Claude/Codex 인증 정보
 개인 Discord 서버 정보
 ```
 
-로그를 공개할 때는 토큰, API key, channel ID, user ID를 제거하세요.
+로그를 공개할 때는 아래 정보를 제거하세요.
+
+```text
+토큰
+API key
+channel ID
+user ID
+개인 서버 이름
+개인 파일 경로
+```
+
+---
+
+## 16. 지금까지의 안전성 개선 요약
+
+최근 보강된 핵심은 다음입니다.
+
+```text
+리뷰어 read-only guard
+NEEDS_REVISION 자동 requeue
+수정 라운드에 이전 리뷰 피드백 주입
+startup recovery
+worker heartbeat
+provider issue → human escalation
+DB index 추가
+task/workflow step claim transaction 처리
+점수제 router classifier
+SPLIT_TASK / NEEDS_HUMAN / RETRY_WITH_DIFFERENT_AGENT 실제 action 구현
+```
+
+이제 AgentRunner는 단순히 “AI에게 요청을 보내는 봇”이 아니라, 작업 상태를 저장하고, 실패를 복구하고, 리뷰를 강제하고, 애매한 상황에서는 사람을 부르는 방향의 런타임으로 발전하고 있습니다.

@@ -59,11 +59,11 @@ export class DesignerAgent implements AgentAdapter {
       });
       const response = await ai.models.generateContent({
         model: this.config.GEMINI_IMAGE_MODEL,
-        contents,
+        contents: contents as never,
       });
 
       const result = await saveGeminiImageResponse({
-        response: response as GeminiImageResponse,
+        response: response as unknown as GeminiImageResponse,
         taskId: input.taskId,
         outputDir: this.config.DESIGNER_OUTPUT_DIR,
       });
@@ -147,7 +147,7 @@ export async function buildGeminiDesignerContents(input: {
   prompt: string;
   referenceImages: ReferenceImage[];
 }): Promise<GeminiInlineDataPart[]> {
-  const imageParts = await Promise.all(input.referenceImages.map(async (image) => ({
+  const imageParts: GeminiInlineDataPart[] = await Promise.all(input.referenceImages.map(async (image) => ({
     inlineData: {
       mimeType: image.mimeType,
       data: await readImageBase64(image.localPath),

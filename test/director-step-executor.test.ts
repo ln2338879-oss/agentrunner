@@ -206,6 +206,51 @@ describe("director workflow step execution", () => {
     expect(store.listTaskReviews("TASK-REVISION-REQUEUE")[0]?.verdict).toBe("NEEDS_REVISION");
   });
 
+  test("retry with different agent verdict escalates to human instead of switching agents", async () => {
+    const { store, vault, config } = await createRuntime();
+    await createImplementationTask(store, "TASK-RETRY-HUMAN");
+    completePlanAndBuild(store, "TASK-RETRY-HUMAN");
+
+    const result = await new StepExecutor({
+      role: "director",
+      owner: "worker:director",
+      store,
+      vault,
+      agent: directorAgent("VERDICT: RETRY_WITH_DIFFERENT_AGENT\nA different provider would be better for this task."),
+      config,
+    }).runOnce();
+
+    expect(result.verdict).toBe("RETRY_WITH_DIFFERENT_AGENT");
+    expect(store.getTask("TASK-RETRY-HUMAN")?.status).toBe("needs_human");
+    expect(store.listTaskArtifacts("TASK-RETRY-HUMAN").some((artifact) => artifact.type === "human_intervention")).toBe(true);
+  });
+
+  test("split task verdict creates child planning tasks", async () => {
+    const { store, vault, config } = await createRuntime();
+    await createImplementationTask(store, "TASK-SPLIT-ACTION");
+    completePlanAndBuild(store, "TASK-SPLIT-ACTION");
+
+    const result = await new StepExecutor({
+      role: "director",
+      owner: "worker:director",
+      store,
+      vault,
+      agent: directorAgent([
+        "VERDICT: SPLIT_TASK",
+        "- Implement the combat controller and add tests.",
+        "- Generate monster stat CSV tables.",
+      ].join("\n")),
+      config,
+    }).runOnce();
+
+    expect(result.verdict).toBe("SPLIT_TASK");
+    expect(store.getTask("TASK-SPLIT-ACTION")?.status).toBe("split_task");
+    const recent = store.listRecentTasks(10);
+    const children = recent.filter((task) => task.id.startsWith("TASK-") && task.id !== "TASK-SPLIT-ACTION" && task.assignedTo === "director");
+    expect(children.length).toBeGreaterThanOrEqual(2);
+    expect(store.listTaskArtifacts("TASK-SPLIT-ACTION").some((artifact) => artifact.type === "split_task_plan")).toBe(true);
+  });
+
   test("requeued builder prompt includes prior review feedback", async () => {
     const { store, vault, config } = await createRuntime();
     await createImplementationTask(store, "TASK-REVISION-FEEDBACK");

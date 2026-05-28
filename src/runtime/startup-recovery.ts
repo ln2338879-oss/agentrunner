@@ -14,6 +14,8 @@ export async function runStartupRecovery(input: {
   config: RuntimeConfig;
   owner: string;
 }): Promise<StartupRecoveryResult> {
+  const mode = normalizeStartupRecoveryMode(input.config.STARTUP_RECOVERY_MODE);
+
   if (!input.config.RECOVER_STALE_TASKS_ON_START) {
     input.store.recordRuntimeEvent({
       kind: "startup_recovery_skipped",
@@ -21,12 +23,12 @@ export async function runStartupRecovery(input: {
       message: "Startup recovery skipped by configuration.",
       metadata: { owner: input.owner },
     });
-    return { recovered: [], mode: input.config.STARTUP_RECOVERY_MODE };
+    return { recovered: [], mode };
   }
 
   const recovered = input.store.recoverInterruptedWorkflowSteps({
     staleMinutes: input.config.STALE_TASK_MINUTES,
-    mode: input.config.STARTUP_RECOVERY_MODE,
+    mode,
   });
 
   if (recovered.length === 0) {
@@ -36,17 +38,17 @@ export async function runStartupRecovery(input: {
       message: "Startup recovery found no interrupted workflow steps.",
       metadata: {
         owner: input.owner,
-        mode: input.config.STARTUP_RECOVERY_MODE,
+        mode,
         staleTaskMinutes: input.config.STALE_TASK_MINUTES,
       },
     });
-    return { recovered, mode: input.config.STARTUP_RECOVERY_MODE };
+    return { recovered, mode };
   }
 
   const reportPath = `08_Recovery/startup-recovery-${Date.now()}.md`;
   await input.vault.writeNote(reportPath, renderStartupRecoveryReport({
     recovered,
-    mode: input.config.STARTUP_RECOVERY_MODE,
+    mode,
     owner: input.owner,
     staleTaskMinutes: input.config.STALE_TASK_MINUTES,
   }));
@@ -57,14 +59,14 @@ export async function runStartupRecovery(input: {
     message: `Startup recovery handled ${recovered.length} interrupted workflow step(s).`,
     metadata: {
       owner: input.owner,
-      mode: input.config.STARTUP_RECOVERY_MODE,
+      mode,
       staleTaskMinutes: input.config.STALE_TASK_MINUTES,
       reportPath,
       recoveredCount: recovered.length,
     },
   });
 
-  return { recovered, mode: input.config.STARTUP_RECOVERY_MODE, reportPath };
+  return { recovered, mode, reportPath };
 }
 
 export function startWorkerHeartbeat(input: {
@@ -96,6 +98,10 @@ export function startWorkerHeartbeat(input: {
       metadata: input.metadata,
     });
   };
+}
+
+function normalizeStartupRecoveryMode(value: string): StartupRecoveryMode {
+  return value === "block" ? "block" : "requeue";
 }
 
 function renderStartupRecoveryReport(input: {

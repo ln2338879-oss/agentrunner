@@ -7,7 +7,8 @@ import type { GroupConfigManager } from "../groups/group-config";
 import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
 import { createPolicyEngine, type PolicyEngine } from "../policies/engine";
-import { runDirectorReview, statusFromVerdict } from "../review/review-loop";
+import { runDirectorReview } from "../review/review-loop";
+import { applyTerminalVerdictAction } from "../review/verdict-actions";
 import { RoleRegistry } from "../roles/registry";
 import { classifyTask } from "../router/classify";
 import { planWorkflowForTask } from "../router/workflow-routing";
@@ -305,12 +306,16 @@ export class Orchestrator {
 
         if (review.verdict !== "NEEDS_REVISION") {
           markPendingWorkflowSteps(this.store, taskId, workflowPlan, "skipped", `Stopped after terminal verdict ${review.verdict}.`);
-          const status = statusFromVerdict(review.verdict);
-          this.store.updateTaskStatus(taskId, status);
-          await this.notifier.blocked({
+          await applyTerminalVerdictAction({
+            store: this.store,
+            vault: this.vault,
+            notifier: this.notifier,
             taskId,
+            verdict: review.verdict,
+            feedback: review.output,
             reviewPath: latestReviewPath,
-            reason: `${review.verdict}: ${review.output}`,
+            owner: leaseOwner,
+            sourceStepId: reviewStep?.id,
           });
           return {
             taskId,
