@@ -19,6 +19,10 @@ export type TaskStatus =
 export type ReviewVerdict =
   | "APPROVED"
   | "NEEDS_REVISION"
+  | "REQUEST_CHANGES"
+  | "NEEDS_TESTS"
+  | "NEEDS_SECURITY_REVIEW"
+  | "NEEDS_ARCHITECTURE_REVIEW"
   | "BLOCKED"
   | "NEEDS_HUMAN"
   | "SPLIT_TASK"
