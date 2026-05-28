@@ -3,6 +3,7 @@ import { RuntimeStore } from "../db/runtime-store";
 import { VaultManager } from "../obsidian/vault-manager";
 import { createDefaultProviderRegistry } from "../providers/registry";
 import { RoleRegistry } from "../roles/registry";
+import { runStartupRecovery, startWorkerHeartbeat } from "../runtime/startup-recovery";
 import { StepScheduler } from "../workflows/step-scheduler";
 
 async function main(): Promise<void> {
@@ -10,6 +11,29 @@ async function main(): Promise<void> {
   const store = await RuntimeStore.open(config.DATABASE_PATH);
   const vault = new VaultManager(config.OBSIDIAN_VAULT_PATH);
   await vault.ensureDefaultFolders();
+
+  const ownerPrefix = `scheduler:${process.pid}`;
+  const stopHeartbeat = startWorkerHeartbeat({
+    store,
+    owner: ownerPrefix,
+    role: "scheduler",
+    config,
+    metadata: { mode: "step-scheduler" },
+  });
+  process.once("beforeExit", stopHeartbeat);
+  process.once("SIGINT", () => {
+    stopHeartbeat();
+    process.exit(130);
+  });
+  process.once("SIGTERM", () => {
+    stopHeartbeat();
+    process.exit(143);
+  });
+
+  const recovery = await runStartupRecovery({ store, vault, config, owner: ownerPrefix });
+  if (recovery.recovered.length > 0) {
+    console.log(`[scheduler] startup recovery ${recovery.mode}: ${recovery.recovered.length} interrupted step(s).`);
+  }
 
   const roleRegistry = await RoleRegistry.load({ path: config.ROLES_CONFIG_PATH });
   const providerRegistry = createDefaultProviderRegistry();
@@ -20,7 +44,7 @@ async function main(): Promise<void> {
     vault,
     config,
     agents,
-    ownerPrefix: `scheduler:${process.pid}`,
+    ownerPrefix,
     maxStepsPerCycle: config.STEP_SCHEDULER_MAX_STEPS_PER_CYCLE,
   });
 
@@ -42,6 +66,8 @@ async function main(): Promise<void> {
       }
     },
   });
+
+  stopHeartbeat();
 }
 
 main().catch((error) => {

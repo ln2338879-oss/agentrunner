@@ -1,8 +1,10 @@
+import { classifyProviderError, type ClassifiedProviderError } from "../providers/error-classifier";
 import { runShellCommand, type ShellCommandResult } from "../utils/command";
 
 export interface CommandCandidateResult {
   command: string;
   result: ShellCommandResult;
+  classification?: ClassifiedProviderError;
 }
 
 export interface CommandFailoverResult extends CommandCandidateResult {
@@ -24,14 +26,16 @@ export async function runCommandWithFailover(input: {
   prompt: string;
   timeoutMs: number;
   enabled: boolean;
+  provider?: string;
 }): Promise<CommandCandidateResult> {
   const result = await runWithFailover({
     commands: input.enabled ? input.commands : input.commands.slice(0, 1),
     cwd: input.cwd,
     input: input.prompt,
     timeoutMs: input.timeoutMs,
+    provider: input.provider,
   });
-  return { command: result.command, result: result.result };
+  return { command: result.command, result: result.result, classification: result.classification };
 }
 
 export async function runWithFailover(input: {
@@ -39,8 +43,10 @@ export async function runWithFailover(input: {
   cwd?: string;
   input?: string;
   timeoutMs?: number;
+  provider?: string;
 }): Promise<CommandFailoverResult> {
   const attempts: CommandCandidateResult[] = [];
+  const provider = input.provider ?? "CLI provider";
 
   for (const command of input.commands) {
     const result = await runShellCommand({
@@ -49,13 +55,27 @@ export async function runWithFailover(input: {
       input: input.input,
       timeoutMs: input.timeoutMs,
     });
-    const candidate = { command, result };
+    const classification = result.ok ? undefined : classifyProviderError({
+      provider,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      timedOut: result.timedOut,
+    });
+    const candidate = { command, result, classification };
     attempts.push(candidate);
     if (result.ok) {
       return {
         ...candidate,
         attempts,
         ok: true,
+        output: result.stdout || result.stderr,
+      };
+    }
+    if (classification?.needsHuman) {
+      return {
+        ...candidate,
+        attempts,
+        ok: false,
         output: result.stdout || result.stderr,
       };
     }
@@ -80,6 +100,8 @@ export function formatFailoverHeader(candidate: CommandCandidateResult): string 
     `ok: ${candidate.result.ok}`,
     `exit_code: ${candidate.result.exitCode ?? "null"}`,
     `timed_out: ${candidate.result.timedOut}`,
+    candidate.classification ? `error_kind: ${candidate.classification.kind}` : undefined,
+    candidate.classification?.needsHuman ? "needs_human: true" : undefined,
     "",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }

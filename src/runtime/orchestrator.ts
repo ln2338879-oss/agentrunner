@@ -7,7 +7,8 @@ import type { GroupConfigManager } from "../groups/group-config";
 import { botReportNote, taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
 import { createPolicyEngine, type PolicyEngine } from "../policies/engine";
-import { runDirectorReview, statusFromVerdict } from "../review/review-loop";
+import { runDirectorReview } from "../review/review-loop";
+import { applyTerminalVerdictAction } from "../review/verdict-actions";
 import { RoleRegistry } from "../roles/registry";
 import { classifyTask } from "../router/classify";
 import { planWorkflowForTask } from "../router/workflow-routing";
@@ -16,6 +17,7 @@ import { runShellCommand } from "../utils/command";
 import { appendVisionAnalysis } from "../vision/adapter";
 import { WorkflowRegistry } from "../workflows/engine";
 import type { PlannedWorkflowStep, WorkflowPlan } from "../workflows/types";
+import { runStartupRecovery } from "./startup-recovery";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./types";
 
 export interface OrchestratorResult {
@@ -63,30 +65,14 @@ export class Orchestrator {
     });
     await this.vault.ensureDefaultFolders();
 
-    if (this.config.RECOVER_STALE_TASKS_ON_START) {
-      const recovered = this.store.recoverStaleTasks({ staleMinutes: this.config.STALE_TASK_MINUTES });
-      if (recovered.length > 0) {
-        const recoveryPath = `08_Recovery/recovery-${Date.now()}.md`;
-        await this.vault.writeNote(
-          recoveryPath,
-          [
-            "---",
-            `created_at: ${new Date().toISOString()}`,
-            `stale_task_minutes: ${this.config.STALE_TASK_MINUTES}`,
-            "---",
-            "",
-            "# Startup Recovery Report",
-            "",
-            "The following stale running or revision tasks were marked as BLOCKED during startup recovery.",
-            "",
-            "| Task | Previous Status | Locked By |",
-            "|---|---|---|",
-            ...recovered.map((task) => `| ${task.id} | ${task.status} | ${task.lockedBy ?? ""} |`),
-            "",
-          ].join("\n"),
-        );
-        await this.notifier.recovery({ count: recovered.length, path: recoveryPath });
-      }
+    const recovery = await runStartupRecovery({
+      store: this.store,
+      vault: this.vault,
+      config: this.config,
+      owner: `orchestrator:${process.pid}`,
+    });
+    if (recovery.reportPath) {
+      await this.notifier.recovery({ count: recovery.recovered.length, path: recovery.reportPath });
     }
   }
 
@@ -226,8 +212,28 @@ export class Orchestrator {
             outputRef: latestReportPath,
             error: result.result.error ?? "Worker failed.",
           });
-          this.store.updateTaskStatus(taskId, "failed");
-          await this.notifier.failed({ taskId, reportPath: latestReportPath, reason: result.result.error });
+          if (result.result.needsHuman) {
+            this.store.updateTaskStatus(taskId, "needs_human");
+            this.store.recordRuntimeEvent({
+              kind: "human_intervention_required",
+              taskId,
+              owner: leaseOwner,
+              message: result.result.error ?? "Provider requires human intervention.",
+              metadata: {
+                role: classified.assignedTo,
+                errorKind: result.result.errorKind,
+                reportPath: latestReportPath,
+              },
+            });
+            await this.notifier.blocked({
+              taskId,
+              reviewPath: latestReportPath,
+              reason: result.result.error ?? "Provider requires human intervention.",
+            });
+          } else {
+            this.store.updateTaskStatus(taskId, "failed");
+            await this.notifier.failed({ taskId, reportPath: latestReportPath, reason: result.result.error });
+          }
           return {
             taskId,
             assignedTo: classified.assignedTo,
@@ -300,12 +306,16 @@ export class Orchestrator {
 
         if (review.verdict !== "NEEDS_REVISION") {
           markPendingWorkflowSteps(this.store, taskId, workflowPlan, "skipped", `Stopped after terminal verdict ${review.verdict}.`);
-          const status = statusFromVerdict(review.verdict);
-          this.store.updateTaskStatus(taskId, status);
-          await this.notifier.blocked({
+          await applyTerminalVerdictAction({
+            store: this.store,
+            vault: this.vault,
+            notifier: this.notifier,
             taskId,
+            verdict: review.verdict,
+            feedback: review.output,
             reviewPath: latestReviewPath,
-            reason: `${review.verdict}: ${review.output}`,
+            owner: leaseOwner,
+            sourceStepId: reviewStep?.id,
           });
           return {
             taskId,
@@ -384,15 +394,21 @@ export class Orchestrator {
       botReportNote({
         taskId: input.taskId,
         role: input.role,
-        status: result.ok ? "ready_for_review" : "failed",
-        body: result.output + (result.error ? `\n\n## Error\n\n${result.error}` : ""),
+        status: result.ok ? "ready_for_review" : result.needsHuman ? "needs_human" : "failed",
+        body: [
+          result.errorKind ? `Error kind: ${result.errorKind}` : "",
+          result.needsHuman ? "Human intervention required: true" : "",
+          "",
+          result.output,
+          result.error ? `\n## Error\n\n${result.error}` : "",
+        ].filter(Boolean).join("\n"),
       }),
     );
 
     this.store.recordArtifact({
       id: `ART-${input.taskId}-${input.role}-r${input.round}-${Date.now()}`,
       taskId: input.taskId,
-      type: "agent_report",
+      type: result.needsHuman ? "human_intervention" : "agent_report",
       path: reportPath,
       createdBy: input.role,
     });

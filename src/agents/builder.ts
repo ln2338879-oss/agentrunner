@@ -1,4 +1,5 @@
 import type { RuntimeConfig } from "../config";
+import { formatHumanEscalation } from "../providers/error-classifier";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
 import { buildCliPrompt } from "../utils/prompt";
 import { runShellCommand } from "../utils/command";
@@ -25,7 +26,29 @@ export class BuilderAgent implements AgentAdapter {
       prompt,
       timeoutMs: config.AI_COMMAND_TIMEOUT_MS,
       enabled: config.ENABLE_AGENT_FAILOVER,
+      provider: "Codex",
     });
+
+    if (codexResult.classification?.needsHuman) {
+      return {
+        ok: false,
+        output: [
+          "# Builder Result",
+          "",
+          formatFailoverHeader(codexResult),
+          formatHumanEscalation({
+            provider: "Codex",
+            command: codexResult.command,
+            classification: codexResult.classification,
+            stderr: codexResult.result.stderr,
+            stdout: codexResult.result.stdout,
+          }),
+        ].join("\n"),
+        error: codexResult.classification.reason,
+        errorKind: codexResult.classification.kind,
+        needsHuman: true,
+      };
+    }
 
     const validation = await this.runValidation(workspacePath, config);
     const output = [
@@ -42,6 +65,8 @@ export class BuilderAgent implements AgentAdapter {
       ok: codexResult.result.ok && !validation.includes("VALIDATION_FAILED"),
       output,
       error: codexResult.result.ok ? extractValidationError(validation) : formatCliError(codexResult.result),
+      errorKind: codexResult.classification?.kind,
+      needsHuman: codexResult.classification?.needsHuman,
     };
   }
 

@@ -50,6 +50,8 @@ export interface AgentRunResult {
   output: string;
   artifacts?: string[];
   error?: string;
+  errorKind?: string;
+  needsHuman?: boolean;
 }
 
 export interface AgentAdapter {

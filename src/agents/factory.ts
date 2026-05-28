@@ -1,4 +1,5 @@
 import type { RuntimeConfig } from "../config";
+import { classifyProviderError, formatHumanEscalation } from "../providers/error-classifier";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
 import { buildCliPrompt } from "../utils/prompt";
 import { formatFailoverHeader, parseCommandCandidates, runCommandWithFailover } from "./failover";
@@ -35,13 +36,35 @@ export class FactoryAgent implements AgentAdapter {
         prompt,
         timeoutMs: config.AI_COMMAND_TIMEOUT_MS,
         enabled: config.ENABLE_AGENT_FAILOVER,
+        provider: "Factory CLI",
       });
+
+      if (cliResult.classification?.needsHuman) {
+        return {
+          ok: false,
+          output: [
+            formatFailoverHeader(cliResult),
+            formatHumanEscalation({
+              provider: "Factory CLI",
+              command: cliResult.command,
+              classification: cliResult.classification,
+              stderr: cliResult.result.stderr,
+              stdout: cliResult.result.stdout,
+            }),
+          ].join("\n"),
+          error: cliResult.classification.reason,
+          errorKind: cliResult.classification.kind,
+          needsHuman: true,
+        };
+      }
 
       if (cliResult.result.ok || !config.ENABLE_AGENT_FAILOVER) {
         return {
           ok: cliResult.result.ok,
           output: formatFailoverHeader(cliResult) + (cliResult.result.stdout || cliResult.result.stderr),
           error: cliResult.result.ok ? undefined : `Factory command failed with exit code ${cliResult.result.exitCode}.`,
+          errorKind: cliResult.classification?.kind,
+          needsHuman: cliResult.classification?.needsHuman,
         };
       }
     }
@@ -57,6 +80,7 @@ export class FactoryAgent implements AgentAdapter {
     for (const baseUrl of baseUrls) {
       for (const model of models) {
         const result = await this.runOllamaOnce({ baseUrl, model, prompt });
+        if (result.needsHuman) return result;
         if (result.ok || !config.ENABLE_AGENT_FAILOVER) return result;
         failures.push(result.error ?? `Factory candidate failed: ${baseUrl} ${model}`);
       }
@@ -93,6 +117,25 @@ export class FactoryAgent implements AgentAdapter {
 
       const body = (await response.json()) as OllamaChatResponse;
       const output = body.choices?.[0]?.message?.content ?? body.error ?? "";
+      const classification = response.ok ? undefined : classifyProviderError({
+        provider: "Ollama",
+        error: output,
+        stdout: output,
+      });
+
+      if (classification?.needsHuman) {
+        return {
+          ok: false,
+          output: formatHumanEscalation({
+            provider: "Ollama",
+            classification,
+            stdout: output,
+          }),
+          error: classification.reason,
+          errorKind: classification.kind,
+          needsHuman: true,
+        };
+      }
 
       return {
         ok: response.ok && output.length > 0,
@@ -102,16 +145,25 @@ export class FactoryAgent implements AgentAdapter {
           `base_url: ${input.baseUrl}`,
           `model: ${input.model}`,
           `ok: ${response.ok}`,
+          classification ? `error_kind: ${classification.kind}` : undefined,
           "",
           output,
-        ].join("\n"),
+        ].filter(Boolean).join("\n"),
         error: response.ok ? undefined : `Ollama request failed with HTTP ${response.status}: ${output}`,
+        errorKind: classification?.kind,
+        needsHuman: classification?.needsHuman,
       };
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const classification = classifyProviderError({ provider: "Ollama", error: message });
       return {
         ok: false,
-        output: "",
-        error: error instanceof Error ? error.message : String(error),
+        output: classification.needsHuman
+          ? formatHumanEscalation({ provider: "Ollama", classification, stderr: message })
+          : "",
+        error: classification.needsHuman ? classification.reason : message,
+        errorKind: classification.kind,
+        needsHuman: classification.needsHuman,
       };
     }
   }

@@ -5,6 +5,11 @@ const OptionalWorkerRoleSchema = z.preprocess(
   z.enum(["director", "builder", "factory", "designer"]).optional(),
 );
 
+const StartupRecoveryModeSchema = z.preprocess(
+  (value) => value === "" ? undefined : value,
+  z.enum(["requeue", "block"]).default("requeue"),
+);
+
 const ConfigSchema = z.object({
   DIRECTOR_DISCORD_TOKEN: z.string().optional().default(""),
   BUILDER_DISCORD_TOKEN: z.string().optional().default(""),
@@ -52,10 +57,15 @@ const ConfigSchema = z.object({
   MAX_REVIEW_ROUNDS: z.coerce.number().int().positive().default(3),
   TASK_LEASE_MINUTES: z.coerce.number().int().positive().default(30),
   RECOVER_STALE_TASKS_ON_START: z.coerce.boolean().default(true),
+  STARTUP_RECOVERY_MODE: StartupRecoveryModeSchema,
   STALE_TASK_MINUTES: z.coerce.number().int().positive().default(120),
+  WORKER_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
   BUILDER_TEST_COMMAND: z.string().optional().default(""),
   BUILDER_BUILD_COMMAND: z.string().optional().default(""),
   BUILDER_DIFF_COMMAND: z.string().optional().default("git diff --stat && git diff --name-only"),
+  REVIEW_READ_ONLY_GUARD: z.coerce.boolean().default(true),
+  REVIEW_DIFF_COMMAND: z.string().optional().default("git diff --stat && git diff --name-only && git diff --check"),
+  REVIEW_CONTEXT_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   APPROVED_TASK_COMMAND: z.string().optional().default(""),
   APPROVED_TASK_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(600000),
   REQUIRE_USER_APPROVAL_BEFORE_COMMIT: z.coerce.boolean().default(true),

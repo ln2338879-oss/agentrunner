@@ -7,6 +7,7 @@ import type { AgentRole, ReviewVerdict, RuntimeTask, TaskStatus, TaskType } from
 import type { WorkflowPlan } from "../workflows/types";
 
 export type WorkflowStepRunStatus = "pending" | "running" | "completed" | "skipped" | "failed";
+export type StartupRecoveryMode = "requeue" | "block";
 
 export interface TaskSummaryRow {
   id: string;
@@ -115,6 +116,32 @@ export interface SteeringMessageRow {
   createdAt: string;
 }
 
+export interface StartupRecoveryRow {
+  taskId: string;
+  taskStatus: string;
+  stepId: string | null;
+  stepStatus: string | null;
+  role: string | null;
+  lockedBy: string | null;
+  lockExpiresAt: string | null;
+}
+
+export interface WorkerHeartbeatRow {
+  owner: string;
+  role: string;
+  pid: number | null;
+  status: string;
+  lastSeenAt: string;
+  metadataJson: string | null;
+}
+
+interface ClaimReadyWorkflowStepCandidate {
+  id: string;
+  taskId: string;
+  stepId: string;
+  dependsOnJson: string;
+}
+
 export class RuntimeStore {
   private readonly db: Database;
 
@@ -189,56 +216,59 @@ export class RuntimeStore {
 
   initializeWorkflowStepRuns(input: { taskId: string; workflowPlan: WorkflowPlan }): void {
     const now = new Date().toISOString();
-    const insert = this.db.query(`
-      INSERT OR IGNORE INTO workflow_step_runs (
-        id,
-        task_id,
-        workflow_id,
-        step_id,
-        step_index,
-        role,
-        resolved_role_id,
-        action,
-        status,
-        depends_on_json,
-        required,
-        requires_review,
-        created_at,
-        updated_at
-      ) VALUES (
-        $id,
-        $taskId,
-        $workflowId,
-        $stepId,
-        $stepIndex,
-        $role,
-        $resolvedRoleId,
-        $action,
-        'pending',
-        $dependsOnJson,
-        $required,
-        $requiresReview,
-        $now,
-        $now
-      )
-    `);
+    const tx = this.db.transaction(() => {
+      const insert = this.db.query(`
+        INSERT OR IGNORE INTO workflow_step_runs (
+          id,
+          task_id,
+          workflow_id,
+          step_id,
+          step_index,
+          role,
+          resolved_role_id,
+          action,
+          status,
+          depends_on_json,
+          required,
+          requires_review,
+          created_at,
+          updated_at
+        ) VALUES (
+          $id,
+          $taskId,
+          $workflowId,
+          $stepId,
+          $stepIndex,
+          $role,
+          $resolvedRoleId,
+          $action,
+          'pending',
+          $dependsOnJson,
+          $required,
+          $requiresReview,
+          $now,
+          $now
+        )
+      `);
 
-    input.workflowPlan.steps.forEach((step, index) => {
-      insert.run({
-        $id: `WSTEP-${input.taskId}-${step.id}`,
-        $taskId: input.taskId,
-        $workflowId: input.workflowPlan.workflowId,
-        $stepId: step.id,
-        $stepIndex: index,
-        $role: step.role,
-        $resolvedRoleId: step.resolvedRoleId,
-        $action: step.action,
-        $dependsOnJson: JSON.stringify(step.dependsOn),
-        $required: step.required ? 1 : 0,
-        $requiresReview: step.requiresReview ? 1 : 0,
-        $now: now,
+      input.workflowPlan.steps.forEach((step, index) => {
+        insert.run({
+          $id: `WSTEP-${input.taskId}-${step.id}`,
+          $taskId: input.taskId,
+          $workflowId: input.workflowPlan.workflowId,
+          $stepId: step.id,
+          $stepIndex: index,
+          $role: step.role,
+          $resolvedRoleId: step.resolvedRoleId,
+          $action: step.action,
+          $dependsOnJson: JSON.stringify(step.dependsOn),
+          $required: step.required ? 1 : 0,
+          $requiresReview: step.requiresReview ? 1 : 0,
+          $now: now,
+        });
       });
     });
+    tx();
   }
 
   claimReadyWorkflowStep(input: {
@@ -249,46 +279,55 @@ export class RuntimeStore {
   }): WorkflowStepRunRow | null {
     const nowIso = input.now ?? new Date().toISOString();
     const expiresAt = new Date(new Date(nowIso).getTime() + input.ttlMinutes * 60_000).toISOString();
-    const candidate = this.db.query(`
-      SELECT
-        step.id as id,
-        step.task_id as taskId,
-        step.step_id as stepId,
-        step.depends_on_json as dependsOnJson
-      FROM workflow_step_runs step
-      JOIN tasks task ON task.id = step.task_id
-      WHERE step.status = 'pending'
-        AND step.resolved_role_id = $roleId
-        AND task.status IN ('pending', 'running', 'needs_revision')
-        AND (step.locked_by IS NULL OR step.lock_expires_at IS NULL OR step.lock_expires_at <= $nowIso)
-      ORDER BY task.created_at ASC, step.step_index ASC
-    `).all({ $roleId: input.roleId, $nowIso: nowIso }) as Array<{
-      id: string;
-      taskId: string;
-      stepId: string;
-      dependsOnJson: string;
-    }>;
 
-    const ready = candidate.find((step) => this.workflowStepDependenciesComplete(step.taskId, step.dependsOnJson));
-    if (!ready) return null;
+    const tx = this.db.transaction((): { taskId: string; stepId: string } | null => {
+      const candidates = this.db.query(`
+        SELECT
+          step.id as id,
+          step.task_id as taskId,
+          step.step_id as stepId,
+          step.depends_on_json as dependsOnJson
+        FROM workflow_step_runs step
+        JOIN tasks task ON task.id = step.task_id
+        WHERE step.status = 'pending'
+          AND step.resolved_role_id = $roleId
+          AND task.status IN ('pending', 'running', 'needs_revision')
+          AND (step.locked_by IS NULL OR step.lock_expires_at IS NULL OR step.lock_expires_at <= $nowIso)
+        ORDER BY task.created_at ASC, step.step_index ASC
+      `).all({ $roleId: input.roleId, $nowIso: nowIso }) as ClaimReadyWorkflowStepCandidate[];
 
-    const result = this.db.query(`
-      UPDATE workflow_step_runs
-      SET status = 'running', locked_by = $owner, lock_expires_at = $expiresAt, started_at = COALESCE(started_at, $nowIso), updated_at = $nowIso
-      WHERE id = $id
-        AND status = 'pending'
-        AND resolved_role_id = $roleId
-        AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso)
-    `).run({
-      $id: ready.id,
-      $roleId: input.roleId,
-      $owner: input.owner,
-      $expiresAt: expiresAt,
-      $nowIso: nowIso,
+      const ready = candidates.find((step) => this.workflowStepDependenciesComplete(step.taskId, step.dependsOnJson));
+      if (!ready) return null;
+
+      const result = this.db.query(`
+        UPDATE workflow_step_runs
+        SET status = 'running', locked_by = $owner, lock_expires_at = $expiresAt, started_at = COALESCE(started_at, $nowIso), updated_at = $nowIso
+        WHERE id = $id
+          AND status = 'pending'
+          AND resolved_role_id = $roleId
+          AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso)
+      `).run({
+        $id: ready.id,
+        $roleId: input.roleId,
+        $owner: input.owner,
+        $expiresAt: expiresAt,
+        $nowIso: nowIso,
+      });
+
+      if (result.changes === 0) return null;
+      this.recordRuntimeEventInCurrentTransaction({
+        kind: "workflow_step_claimed",
+        taskId: ready.taskId,
+        stepId: ready.stepId,
+        owner: input.owner,
+        message: `Workflow step claimed by ${input.owner}.`,
+        metadata: { roleId: input.roleId, expiresAt },
+      });
+      return { taskId: ready.taskId, stepId: ready.stepId };
     });
 
-    if (result.changes === 0) return null;
-    return this.getWorkflowStepRun(ready.taskId, ready.stepId);
+    const claimed = tx();
+    return claimed ? this.getWorkflowStepRun(claimed.taskId, claimed.stepId) : null;
   }
 
   completeWorkflowStepRun(input: {
@@ -352,6 +391,33 @@ export class RuntimeStore {
       $status: input.status,
       $outputRef: input.outputRef ?? null,
       $error: input.error ?? null,
+      $now: now,
+    });
+  }
+
+  requeueWorkflowStepRun(input: {
+    taskId: string;
+    stepId: string;
+    reason?: string;
+    now?: string;
+  }): void {
+    const now = input.now ?? new Date().toISOString();
+    this.db.query(`
+      UPDATE workflow_step_runs
+      SET
+        status = 'pending',
+        locked_by = NULL,
+        lock_expires_at = NULL,
+        started_at = NULL,
+        finished_at = NULL,
+        output_ref = NULL,
+        error = $reason,
+        updated_at = $now
+      WHERE task_id = $taskId AND step_id = $stepId
+    `).run({
+      $taskId: input.taskId,
+      $stepId: input.stepId,
+      $reason: input.reason ?? null,
       $now: now,
     });
   }
@@ -498,38 +564,50 @@ export class RuntimeStore {
     const nowIso = now.toISOString();
     const expiresAt = new Date(now.getTime() + input.ttlMinutes * 60_000).toISOString();
 
-    const candidate = this.db.query(`
-      SELECT id
-      FROM tasks
-      WHERE status = 'pending'
-        AND assigned_to = $role
-        AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso)
-      ORDER BY created_at ASC
-      LIMIT 1
-    `).get({
-      $role: input.role,
-      $nowIso: nowIso,
-    }) as { id: string } | null;
+    const tx = this.db.transaction((): string | null => {
+      const candidate = this.db.query(`
+        SELECT id
+        FROM tasks
+        WHERE status = 'pending'
+          AND assigned_to = $role
+          AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso)
+        ORDER BY created_at ASC
+        LIMIT 1
+      `).get({
+        $role: input.role,
+        $nowIso: nowIso,
+      }) as { id: string } | null;
 
-    if (!candidate) return null;
+      if (!candidate) return null;
 
-    const result = this.db.query(`
-      UPDATE tasks
-      SET status = 'running', locked_by = $owner, lock_expires_at = $expiresAt, updated_at = $nowIso
-      WHERE id = $taskId
-        AND status = 'pending'
-        AND assigned_to = $role
-        AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso)
-    `).run({
-      $taskId: candidate.id,
-      $role: input.role,
-      $owner: input.owner,
-      $expiresAt: expiresAt,
-      $nowIso: nowIso,
+      const result = this.db.query(`
+        UPDATE tasks
+        SET status = 'running', locked_by = $owner, lock_expires_at = $expiresAt, updated_at = $nowIso
+        WHERE id = $taskId
+          AND status = 'pending'
+          AND assigned_to = $role
+          AND (locked_by IS NULL OR lock_expires_at IS NULL OR lock_expires_at <= $nowIso)
+      `).run({
+        $taskId: candidate.id,
+        $role: input.role,
+        $owner: input.owner,
+        $expiresAt: expiresAt,
+        $nowIso: nowIso,
+      });
+
+      if (result.changes === 0) return null;
+      this.recordRuntimeEventInCurrentTransaction({
+        kind: "task_claimed",
+        taskId: candidate.id,
+        owner: input.owner,
+        message: `Task claimed by ${input.owner}.`,
+        metadata: { role: input.role, expiresAt },
+      });
+      return candidate.id;
     });
 
-    if (result.changes === 0) return null;
-    return this.getTask(candidate.id);
+    const claimedTaskId = tx();
+    return claimedTaskId ? this.getTask(claimedTaskId) : null;
   }
 
   getTaskPrompt(taskId: string): string {
@@ -776,24 +854,132 @@ export class RuntimeStore {
 
   recoverStaleTasks(input: { staleMinutes: number }): Array<{ id: string; status: string; lockedBy: string | null }> {
     const staleBefore = new Date(Date.now() - input.staleMinutes * 60_000).toISOString();
-    const rows = this.db.query(`
-      SELECT id, status, locked_by as lockedBy
-      FROM tasks
-      WHERE status IN ('running', 'needs_revision')
-        AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
-    `).all({ $staleBefore: staleBefore }) as Array<{ id: string; status: string; lockedBy: string | null }>;
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      const rows = this.db.query(`
+        SELECT id, status, locked_by as lockedBy
+        FROM tasks
+        WHERE status IN ('running', 'needs_revision')
+          AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
+      `).all({ $staleBefore: staleBefore }) as Array<{ id: string; status: string; lockedBy: string | null }>;
 
-    this.db.query(`
-      UPDATE tasks
-      SET status = 'blocked', locked_by = NULL, lock_expires_at = NULL, updated_at = $updatedAt
-      WHERE status IN ('running', 'needs_revision')
-        AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
-    `).run({
-      $staleBefore: staleBefore,
-      $updatedAt: new Date().toISOString(),
+      this.db.query(`
+        UPDATE tasks
+        SET status = 'blocked', locked_by = NULL, lock_expires_at = NULL, updated_at = $updatedAt
+        WHERE status IN ('running', 'needs_revision')
+          AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
+      `).run({
+        $staleBefore: staleBefore,
+        $updatedAt: now,
+      });
+
+      return rows;
     });
 
-    return rows;
+    return tx();
+  }
+
+  recoverInterruptedWorkflowSteps(input: { staleMinutes: number; mode: StartupRecoveryMode }): StartupRecoveryRow[] {
+    const staleBefore = new Date(Date.now() - input.staleMinutes * 60_000).toISOString();
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      const rows = this.db.query(`
+        SELECT
+          task.id as taskId,
+          task.status as taskStatus,
+          step.step_id as stepId,
+          step.status as stepStatus,
+          step.role as role,
+          step.locked_by as lockedBy,
+          step.lock_expires_at as lockExpiresAt
+        FROM workflow_step_runs step
+        JOIN tasks task ON task.id = step.task_id
+        WHERE step.status = 'running'
+          AND task.status IN ('pending', 'running', 'needs_revision')
+          AND (step.lock_expires_at IS NULL OR step.lock_expires_at <= $staleBefore OR step.updated_at <= $staleBefore)
+        ORDER BY task.created_at ASC, step.step_index ASC
+      `).all({ $staleBefore: staleBefore }) as StartupRecoveryRow[];
+
+      if (rows.length === 0) return rows;
+
+      const taskIds = [...new Set(rows.map((row) => row.taskId))];
+      const stepUpdate = input.mode === "requeue"
+        ? `
+          UPDATE workflow_step_runs
+          SET status = 'pending', locked_by = NULL, lock_expires_at = NULL, started_at = NULL, finished_at = NULL,
+              error = $reason, updated_at = $now
+          WHERE status = 'running'
+            AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
+        `
+        : `
+          UPDATE workflow_step_runs
+          SET status = 'failed', locked_by = NULL, lock_expires_at = NULL, finished_at = $now,
+              error = $reason, updated_at = $now
+          WHERE status = 'running'
+            AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
+        `;
+      this.db.query(stepUpdate).run({
+        $staleBefore: staleBefore,
+        $reason: `Startup recovery ${input.mode} after stale running step detection.`,
+        $now: now,
+      });
+
+      for (const taskId of taskIds) {
+        const nextStatus = input.mode === "requeue" ? taskStatusAfterRequeue(this.getTask(taskId)?.status) : "blocked";
+        this.db.query(`
+          UPDATE tasks
+          SET status = $status, locked_by = NULL, lock_expires_at = NULL, updated_at = $now
+          WHERE id = $taskId
+        `).run({ $taskId: taskId, $status: nextStatus, $now: now });
+        this.recordRuntimeEventInCurrentTransaction({
+          kind: "startup_recovery",
+          taskId,
+          message: `Recovered ${rows.filter((row) => row.taskId === taskId).length} interrupted workflow step(s) with mode=${input.mode}.`,
+          metadata: { mode: input.mode, staleBefore },
+        });
+      }
+
+      return rows;
+    });
+
+    return tx();
+  }
+
+  recordRuntimeEvent(input: {
+    kind: string;
+    taskId?: string;
+    stepId?: string;
+    owner?: string;
+    message: string;
+    metadata?: unknown;
+  }): void {
+    this.recordRuntimeEventInCurrentTransaction(input);
+  }
+
+  upsertWorkerHeartbeat(input: {
+    owner: string;
+    role: AgentRole | "scheduler";
+    pid?: number;
+    status: string;
+    metadata?: unknown;
+  }): void {
+    this.db.query(`
+      INSERT INTO worker_heartbeats (owner, role, pid, status, last_seen_at, metadata_json)
+      VALUES ($owner, $role, $pid, $status, $lastSeenAt, $metadataJson)
+      ON CONFLICT(owner) DO UPDATE SET
+        role = excluded.role,
+        pid = excluded.pid,
+        status = excluded.status,
+        last_seen_at = excluded.last_seen_at,
+        metadata_json = excluded.metadata_json
+    `).run({
+      $owner: input.owner,
+      $role: input.role,
+      $pid: input.pid ?? null,
+      $status: input.status,
+      $lastSeenAt: new Date().toISOString(),
+      $metadataJson: input.metadata === undefined ? null : JSON.stringify(input.metadata),
+    });
   }
 
   recordTaskRun(input: {
@@ -962,6 +1148,29 @@ export class RuntimeStore {
     `);
   }
 
+  private recordRuntimeEventInCurrentTransaction(input: {
+    kind: string;
+    taskId?: string;
+    stepId?: string;
+    owner?: string;
+    message: string;
+    metadata?: unknown;
+  }): void {
+    this.db.query(`
+      INSERT INTO runtime_events (id, kind, task_id, step_id, owner, message, metadata_json, created_at)
+      VALUES ($id, $kind, $taskId, $stepId, $owner, $message, $metadataJson, $createdAt)
+    `).run({
+      $id: `EVT-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      $kind: input.kind,
+      $taskId: input.taskId ?? null,
+      $stepId: input.stepId ?? null,
+      $owner: input.owner ?? null,
+      $message: input.message,
+      $metadataJson: input.metadata === undefined ? null : JSON.stringify(input.metadata),
+      $createdAt: new Date().toISOString(),
+    });
+  }
+
   private ensureColumn(table: string, column: string, definition: string): void {
     const rows = this.db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
     if (rows.some((row) => row.name === column)) return;
@@ -976,4 +1185,9 @@ function parseStringArray(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function taskStatusAfterRequeue(status: string | undefined): TaskStatus {
+  if (status === "needs_revision") return "needs_revision";
+  return "pending";
 }
