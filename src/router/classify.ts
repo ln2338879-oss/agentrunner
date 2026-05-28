@@ -62,6 +62,7 @@ const SIGNAL_RULES: SignalRule[] = [
     weight: 4,
     label: "code/build/test implementation work",
     patterns: [
+      /\bimplement\b/i,
       /\bcode\b/i,
       /\bbuild\b/i,
       /\btest\b/i,
@@ -210,6 +211,13 @@ const CREATE_OR_GENERATE_PATTERNS = [
   /\blist\b/i,
 ];
 
+const TECHNICAL_VISUAL_PATTERNS = [
+  /이미지\s*(처리|파싱|업로드|첨부|분석|인식)/,
+  /파일\s*(처리|파싱|업로드|첨부)/,
+  /image\s*(processing|parser|parsing|upload|attachment|analysis)/i,
+  /attachment\s*(parser|upload|handling)/i,
+];
+
 export function classifyTask(message: string): ClassifiedTask {
   const normalized = normalizeMessage(message);
   const scores: Record<AgentRole, number> = {
@@ -276,10 +284,11 @@ function applyContextualAdjustments(input: {
 }): void {
   const hasImplementationSignal = input.scores.builder >= 4;
   const hasVisualSignal = input.scores.designer > 0;
+  const hasTechnicalVisualSignal = matchesAny(input.normalized, TECHNICAL_VISUAL_PATTERNS);
   const hasContentSignal = input.scores.factory > 0;
   const hasCreationSignal = matchesAny(input.normalized, CREATE_OR_GENERATE_PATTERNS);
 
-  if (hasImplementationSignal && hasVisualSignal) {
+  if (hasImplementationSignal && (hasVisualSignal || hasTechnicalVisualSignal)) {
     input.scores.builder += 3;
     input.signalHits.push("implementation override for visual technical/fix request");
   }
@@ -326,6 +335,10 @@ function detectAmbiguity(input: {
     ambiguity.push("Asset request can mean visual asset or content/data asset.");
   }
 
+  if (/에셋|asset/i.test(input.normalized) && input.categoryHits.has("planning") && input.categoryHits.has("content")) {
+    ambiguity.push("Asset request mixes planning analysis with content/data output.");
+  }
+
   return ambiguity;
 }
 
@@ -341,6 +354,9 @@ function shouldRouteAmbiguousRequestToDirector(input: {
 
   const builderHasStrongOverride = input.scores.builder >= 7 && /버그|오류|에러|수정|고쳐|fix|bug|code|코드|구현|test|테스트/i.test(input.normalized);
   if (builderHasStrongOverride) return false;
+
+  const assetPlanningContentMix = /에셋|asset/i.test(input.normalized) && input.scores.director > 0 && input.scores.factory > 0;
+  if (assetPlanningContentMix) return true;
 
   const topMargin = input.second ? input.top.score - input.second.score : input.top.score;
   return topMargin <= 1;
