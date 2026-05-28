@@ -63,7 +63,7 @@ export class DesignerAgent implements AgentAdapter {
       });
 
       const result = await saveGeminiImageResponse({
-        response: response as GeminiImageResponse,
+        response: response as unknown as GeminiImageResponse,
         taskId: input.taskId,
         outputDir: this.config.DESIGNER_OUTPUT_DIR,
       });
