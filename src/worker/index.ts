@@ -7,6 +7,7 @@ import { RuntimeStore } from "../db/runtime-store";
 import { VaultManager } from "../obsidian/vault-manager";
 import { runStartupRecovery, startWorkerHeartbeat } from "../runtime/startup-recovery";
 import type { AgentAdapter, AgentRole } from "../runtime/types";
+import { withTaskWorkspaceIsolation } from "../safety/workspace-agent";
 import { WorkerPoller } from "./poller";
 
 async function main(): Promise<void> {
@@ -75,6 +76,10 @@ async function main(): Promise<void> {
 }
 
 function createAgent(role: AgentRole, config: ReturnType<typeof loadConfig>): AgentAdapter {
+  return withTaskWorkspaceIsolation(createBaseAgent(role, config), config);
+}
+
+function createBaseAgent(role: AgentRole, config: ReturnType<typeof loadConfig>): AgentAdapter {
   if (role === "director") return new DirectorAgent(config);
   if (role === "builder") return new BuilderAgent(config);
   if (role === "factory") return new FactoryAgent(config);
