@@ -26,6 +26,12 @@ export class DirectorAgent implements AgentAdapter {
       timeoutMs: config.AI_COMMAND_TIMEOUT_MS,
       enabled: config.ENABLE_AGENT_FAILOVER,
       provider: "Claude Code",
+      isolationPolicy: {
+        role: this.role,
+        mode: "readonly",
+        projectRoot: config.PROJECT_ROOT,
+        action: input.role === "director" ? "review-or-plan" : undefined,
+      },
     });
 
     const output = formatDirectorOutput(candidate);

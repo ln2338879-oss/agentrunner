@@ -1,6 +1,7 @@
 import type { RuntimeConfig } from "../config";
 import { classifyProviderError, formatHumanEscalation } from "../providers/error-classifier";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
+import { assessHumanApprovalRisk, formatHumanApprovalRiskReport } from "../safety/risk-gate";
 import { buildCliPrompt } from "../utils/prompt";
 import { formatFailoverHeader, parseCommandCandidates, runCommandWithFailover } from "./failover";
 
@@ -20,6 +21,21 @@ export class FactoryAgent implements AgentAdapter {
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     const config = input.runtimeConfig ?? this.config;
+    const risk = assessHumanApprovalRisk({
+      prompt: input.prompt,
+      action: "generate",
+      role: this.role,
+      config,
+    });
+    if (risk.requiresHumanApproval) {
+      return {
+        ok: false,
+        output: formatHumanApprovalRiskReport(risk),
+        error: "Human approval required for high-risk operation.",
+        errorKind: "human_approval_required",
+        needsHuman: true,
+      };
+    }
 
     const prompt = buildCliPrompt({
       role: "Factory",

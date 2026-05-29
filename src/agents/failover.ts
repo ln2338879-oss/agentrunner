@@ -1,5 +1,7 @@
 import { classifyProviderError, type ClassifiedProviderError } from "../providers/error-classifier";
-import { runShellCommand, type ShellCommandResult } from "../utils/command";
+import type { RuntimeIsolationPolicy } from "../safety/runtime-isolation";
+import { runIsolatedCommand } from "../utils/isolated-command";
+import type { ShellCommandResult } from "../utils/command";
 
 export interface CommandCandidateResult {
   command: string;
@@ -27,6 +29,7 @@ export async function runCommandWithFailover(input: {
   timeoutMs: number;
   enabled: boolean;
   provider?: string;
+  isolationPolicy?: RuntimeIsolationPolicy;
 }): Promise<CommandCandidateResult> {
   const result = await runWithFailover({
     commands: input.enabled ? input.commands : input.commands.slice(0, 1),
@@ -34,6 +37,7 @@ export async function runCommandWithFailover(input: {
     input: input.prompt,
     timeoutMs: input.timeoutMs,
     provider: input.provider,
+    isolationPolicy: input.isolationPolicy,
   });
   return { command: result.command, result: result.result, classification: result.classification };
 }
@@ -44,16 +48,19 @@ export async function runWithFailover(input: {
   input?: string;
   timeoutMs?: number;
   provider?: string;
+  isolationPolicy?: RuntimeIsolationPolicy;
 }): Promise<CommandFailoverResult> {
   const attempts: CommandCandidateResult[] = [];
   const provider = input.provider ?? "CLI provider";
+  const isolationPolicy = input.isolationPolicy ?? defaultIsolationPolicy(provider, input.cwd);
 
   for (const command of input.commands) {
-    const result = await runShellCommand({
+    const result = await runIsolatedCommand({
       command,
       cwd: input.cwd,
       input: input.input,
       timeoutMs: input.timeoutMs,
+      isolationPolicy,
     });
     const classification = result.ok ? undefined : classifyProviderError({
       provider,
@@ -104,4 +111,25 @@ export function formatFailoverHeader(candidate: CommandCandidateResult): string 
     candidate.classification?.needsHuman ? "needs_human: true" : undefined,
     "",
   ].filter(Boolean).join("\n");
+}
+
+function defaultIsolationPolicy(provider: string, cwd?: string): RuntimeIsolationPolicy | undefined {
+  if (!cwd) return undefined;
+  if (provider === "Claude Code") {
+    return {
+      role: "director",
+      mode: "readonly",
+      projectRoot: cwd,
+      action: "review-or-plan",
+    };
+  }
+  if (provider === "Codex" || provider === "Factory CLI") {
+    return {
+      role: provider === "Codex" ? "builder" : "factory",
+      mode: "workspace-write",
+      projectRoot: cwd,
+      action: provider === "Codex" ? "implement" : "generate",
+    };
+  }
+  return undefined;
 }
