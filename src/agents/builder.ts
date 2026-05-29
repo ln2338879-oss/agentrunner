@@ -1,6 +1,7 @@
 import type { RuntimeConfig } from "../config";
 import { formatHumanEscalation } from "../providers/error-classifier";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
+import { assessHumanApprovalRisk, formatHumanApprovalRiskReport } from "../safety/risk-gate";
 import { buildCliPrompt } from "../utils/prompt";
 import { runShellCommand } from "../utils/command";
 import { formatFailoverHeader, parseCommandCandidates, runCommandWithFailover } from "./failover";
@@ -13,6 +14,22 @@ export class BuilderAgent implements AgentAdapter {
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     const config = input.runtimeConfig ?? this.config;
     const workspacePath = input.workspacePath ?? config.PROJECT_ROOT;
+    const risk = assessHumanApprovalRisk({
+      prompt: input.prompt,
+      action: "implement",
+      role: this.role,
+      config,
+    });
+    if (risk.requiresHumanApproval) {
+      return {
+        ok: false,
+        output: formatHumanApprovalRiskReport(risk),
+        error: "Human approval required for high-risk operation.",
+        errorKind: "human_approval_required",
+        needsHuman: true,
+      };
+    }
+
     const prompt = buildCliPrompt({
       role: "Builder",
       taskId: input.taskId,
