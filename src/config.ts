@@ -60,6 +60,8 @@ const ConfigSchema = z.object({
   STARTUP_RECOVERY_MODE: StartupRecoveryModeSchema,
   STALE_TASK_MINUTES: z.coerce.number().int().positive().default(120),
   WORKER_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
+  TASK_WORKTREE_ISOLATION_ENABLED: z.coerce.boolean().default(true),
+  TASK_WORKTREE_ROOT: z.string().optional().default(""),
   BUILDER_TEST_COMMAND: z.string().optional().default(""),
   BUILDER_BUILD_COMMAND: z.string().optional().default(""),
   BUILDER_DIFF_COMMAND: z.string().optional().default("git diff --stat && git diff --name-only"),
