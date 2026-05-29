@@ -4,6 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import type { RuntimeConfig } from "../config";
 import { classifyProviderError, formatHumanEscalation } from "../providers/error-classifier";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
+import { assessHumanApprovalRisk, formatHumanApprovalRiskReport } from "../safety/risk-gate";
 
 export interface GeminiInlineDataPart {
   inlineData?: {
@@ -32,7 +33,24 @@ export class DesignerAgent implements AgentAdapter {
   constructor(private readonly config: RuntimeConfig) {}
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
-    if (!this.config.GEMINI_API_KEY) {
+    const config = input.runtimeConfig ?? this.config;
+    const risk = assessHumanApprovalRisk({
+      prompt: input.prompt,
+      action: "design",
+      role: this.role,
+      config,
+    });
+    if (risk.requiresHumanApproval) {
+      return {
+        ok: false,
+        output: formatHumanApprovalRiskReport(risk),
+        error: "Human approval required for high-risk operation.",
+        errorKind: "human_approval_required",
+        needsHuman: true,
+      };
+    }
+
+    if (!config.GEMINI_API_KEY) {
       const classification = classifyProviderError({
         provider: "Gemini Image",
         error: "GEMINI_API_KEY is required for DesignerAgent.",
@@ -51,27 +69,27 @@ export class DesignerAgent implements AgentAdapter {
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey: this.config.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
       const referenceImages = extractReferenceImages(input.prompt);
       const contents = await buildGeminiDesignerContents({
         prompt: input.prompt,
         referenceImages,
       });
       const response = await ai.models.generateContent({
-        model: this.config.GEMINI_IMAGE_MODEL,
+        model: config.GEMINI_IMAGE_MODEL,
         contents: contents as never,
       });
 
       const result = await saveGeminiImageResponse({
         response: response as unknown as GeminiImageResponse,
         taskId: input.taskId,
-        outputDir: this.config.DESIGNER_OUTPUT_DIR,
+        outputDir: config.DESIGNER_OUTPUT_DIR,
       });
 
       return {
         ok: result.artifacts.length > 0 || result.notes.length > 0,
         output: formatDesignerOutput({
-          model: this.config.GEMINI_IMAGE_MODEL,
+          model: config.GEMINI_IMAGE_MODEL,
           notes: result.notes,
           artifacts: result.artifacts,
           referenceImages,
