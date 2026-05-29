@@ -7,8 +7,8 @@ describe("task workspace agent wrapper", () => {
   test("passes project root workspace when task workspace isolation is disabled", async () => {
     const config = loadConfig({
       PROJECT_ROOT: "/tmp/agentrunner-project",
-      TASK_WORKTREE_ISOLATION_ENABLED: "false",
-    });
+      TASK_WORKTREE_ISOLATION_ENABLED: false,
+    } as unknown as NodeJS.ProcessEnv);
     let captured: AgentRunInput | undefined;
     const base: AgentAdapter = {
       role: "builder",
