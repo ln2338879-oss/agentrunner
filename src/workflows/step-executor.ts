@@ -9,6 +9,7 @@ import {
   compareReviewSafetySnapshots,
   type ReviewSafetySnapshot,
 } from "../review/review-safety";
+import { assessStrictReview, enforceStrictReviewGate } from "../review/strict-review";
 import { applyTerminalVerdictAction } from "../review/verdict-actions";
 import { parseReviewVerdict } from "../review/verdict";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "../runtime/types";
@@ -53,11 +54,18 @@ export class StepExecutor {
         workspacePath: this.options.config.PROJECT_ROOT,
       });
       result = await this.applyReviewSafetyResult(step, result, reviewSafetyBefore);
-      const output = result.output || result.error || "Step execution returned no output.";
+      let output = result.output || result.error || "Step execution returned no output.";
       const reportPath = stepReportPath(step, this.options.role);
       const runStatus = result.ok ? "completed" : "failed";
       const stepStatus: StepExecutorResult["status"] = result.ok ? "completed" : result.needsHuman ? "needs_human" : "failed";
-      const verdict = isReviewAction(step.action) ? parseStepReviewVerdict(result, output) : undefined;
+      let verdict = isReviewAction(step.action) ? parseStepReviewVerdict(result, output) : undefined;
+
+      if (result.ok && verdict) {
+        const gated = await this.applyStrictReviewGate({ verdict, output });
+        verdict = gated.verdict;
+        output = gated.output;
+        result = { ...result, output };
+      }
 
       this.recordTaskRun({ step, prompt, result: { ...result, output }, status: runStatus, startedAt });
       await this.writeReport({ step, result: { ...result, output }, status: runStatus, reportPath, verdict });
@@ -314,6 +322,22 @@ export class StepExecutor {
       error: "Review read-only guard detected workspace mutations.",
       artifacts: result.artifacts,
     };
+  }
+
+  private async applyStrictReviewGate(input: {
+    verdict: ReviewVerdict;
+    output: string;
+  }): Promise<{ verdict: ReviewVerdict; output: string }> {
+    const assessment = await assessStrictReview({
+      workspacePath: this.options.config.PROJECT_ROOT,
+      config: this.options.config,
+    });
+
+    return enforceStrictReviewGate({
+      verdict: input.verdict,
+      output: input.output,
+      assessment,
+    });
   }
 
   private recordTaskRun(input: {
