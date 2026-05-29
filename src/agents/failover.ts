@@ -1,5 +1,7 @@
 import { classifyProviderError, type ClassifiedProviderError } from "../providers/error-classifier";
-import { runShellCommand, type ShellCommandResult } from "../utils/command";
+import type { RuntimeIsolationPolicy } from "../safety/runtime-isolation";
+import { runIsolatedCommand } from "../utils/isolated-command";
+import type { ShellCommandResult } from "../utils/command";
 
 export interface CommandCandidateResult {
   command: string;
@@ -27,6 +29,7 @@ export async function runCommandWithFailover(input: {
   timeoutMs: number;
   enabled: boolean;
   provider?: string;
+  isolationPolicy?: RuntimeIsolationPolicy;
 }): Promise<CommandCandidateResult> {
   const result = await runWithFailover({
     commands: input.enabled ? input.commands : input.commands.slice(0, 1),
@@ -34,6 +37,7 @@ export async function runCommandWithFailover(input: {
     input: input.prompt,
     timeoutMs: input.timeoutMs,
     provider: input.provider,
+    isolationPolicy: input.isolationPolicy,
   });
   return { command: result.command, result: result.result, classification: result.classification };
 }
@@ -44,16 +48,18 @@ export async function runWithFailover(input: {
   input?: string;
   timeoutMs?: number;
   provider?: string;
+  isolationPolicy?: RuntimeIsolationPolicy;
 }): Promise<CommandFailoverResult> {
   const attempts: CommandCandidateResult[] = [];
   const provider = input.provider ?? "CLI provider";
 
   for (const command of input.commands) {
-    const result = await runShellCommand({
+    const result = await runIsolatedCommand({
       command,
       cwd: input.cwd,
       input: input.input,
       timeoutMs: input.timeoutMs,
+      isolationPolicy: input.isolationPolicy,
     });
     const classification = result.ok ? undefined : classifyProviderError({
       provider,
