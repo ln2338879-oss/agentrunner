@@ -2,6 +2,30 @@ import type { RuntimeConfig } from "../config";
 import type { ReviewVerdict } from "../runtime/types";
 import { runShellCommand, type ShellCommandResult } from "../utils/command";
 
+interface StrictReviewConfigShape {
+  STRICT_REVIEW_ENABLED?: boolean;
+  STRICT_REVIEW_REQUIRE_TESTS?: boolean;
+  STRICT_REVIEW_COMMANDS?: string;
+  STRICT_REVIEW_COMMAND_TIMEOUT_MS?: number;
+  STRICT_REVIEW_FAIL_ON_VALIDATION_ERROR?: boolean;
+  STRICT_REVIEW_BLOCK_LOCKFILE_CHANGES?: boolean;
+  REVIEW_CONTEXT_COMMAND_TIMEOUT_MS?: number;
+  BUILDER_TEST_COMMAND?: string;
+  BUILDER_BUILD_COMMAND?: string;
+}
+
+interface StrictReviewOptions {
+  enabled: boolean;
+  requireTests: boolean;
+  commands: string;
+  commandTimeoutMs: number;
+  failOnValidationError: boolean;
+  blockLockfileChanges: boolean;
+  contextTimeoutMs: number;
+  builderTestCommand: string;
+  builderBuildCommand: string;
+}
+
 export interface StrictReviewValidationResult {
   command: string;
   ok: boolean;
@@ -29,12 +53,12 @@ export async function assessStrictReview(input: {
   config: RuntimeConfig;
   includeValidation?: boolean;
 }): Promise<StrictReviewAssessment> {
-  const enabled = input.config.STRICT_REVIEW_ENABLED;
-  if (!enabled) {
+  const options = strictReviewOptions(input.config);
+  if (!options.enabled) {
     return emptyAssessment({ enabled: false, supported: true, context: "Strict review is disabled." });
   }
 
-  const changedFiles = await listChangedFiles(input.workspacePath, input.config.REVIEW_CONTEXT_COMMAND_TIMEOUT_MS);
+  const changedFiles = await listChangedFiles(input.workspacePath, options.contextTimeoutMs);
   if (!changedFiles.supported) {
     return emptyAssessment({
       enabled: true,
@@ -53,22 +77,22 @@ export async function assessStrictReview(input: {
   const lockfileChangedFiles = changedFiles.files.filter(isLockfile);
   const validationResults = input.includeValidation === false
     ? []
-    : await runValidationCommands(input.workspacePath, input.config);
+    : await runValidationCommands(input.workspacePath, options);
 
   const blockingIssues: string[] = [];
-  if (input.config.STRICT_REVIEW_REQUIRE_TESTS && codeChangedFiles.length > 0 && testChangedFiles.length === 0) {
+  if (options.requireTests && codeChangedFiles.length > 0 && testChangedFiles.length === 0) {
     blockingIssues.push(
       "Code files changed but no test/spec files changed. Add or update meaningful tests, or explicitly justify why tests are not applicable.",
     );
   }
 
-  if (input.config.STRICT_REVIEW_BLOCK_LOCKFILE_CHANGES && lockfileChangedFiles.length > 0) {
+  if (options.blockLockfileChanges && lockfileChangedFiles.length > 0) {
     blockingIssues.push(
       `Lock/dependency files changed under strict review: ${lockfileChangedFiles.join(", ")}. Human approval or explicit dependency-change justification is required.`,
     );
   }
 
-  if (input.config.STRICT_REVIEW_FAIL_ON_VALIDATION_ERROR) {
+  if (options.failOnValidationError) {
     for (const result of validationResults) {
       if (!result.ok) {
         blockingIssues.push(`Validation command failed: ${result.command}`);
@@ -84,7 +108,7 @@ export async function assessStrictReview(input: {
     lockfileChangedFiles,
     validationResults,
     blockingIssues,
-    requireTests: input.config.STRICT_REVIEW_REQUIRE_TESTS,
+    requireTests: options.requireTests,
     includeValidation: input.includeValidation !== false,
   });
 
@@ -125,6 +149,21 @@ export function enforceStrictReviewGate(input: {
   return {
     verdict: "NEEDS_REVISION",
     output: [input.output, "", gateReport].join("\n"),
+  };
+}
+
+function strictReviewOptions(config: RuntimeConfig): StrictReviewOptions {
+  const raw = config as unknown as StrictReviewConfigShape;
+  return {
+    enabled: raw.STRICT_REVIEW_ENABLED ?? true,
+    requireTests: raw.STRICT_REVIEW_REQUIRE_TESTS ?? true,
+    commands: raw.STRICT_REVIEW_COMMANDS ?? "",
+    commandTimeoutMs: raw.STRICT_REVIEW_COMMAND_TIMEOUT_MS ?? 300000,
+    failOnValidationError: raw.STRICT_REVIEW_FAIL_ON_VALIDATION_ERROR ?? true,
+    blockLockfileChanges: raw.STRICT_REVIEW_BLOCK_LOCKFILE_CHANGES ?? false,
+    contextTimeoutMs: raw.REVIEW_CONTEXT_COMMAND_TIMEOUT_MS ?? 120000,
+    builderTestCommand: raw.BUILDER_TEST_COMMAND ?? "",
+    builderBuildCommand: raw.BUILDER_BUILD_COMMAND ?? "",
   };
 }
 
@@ -189,25 +228,25 @@ async function listChangedFiles(workspacePath: string, timeoutMs: number): Promi
 
 async function runValidationCommands(
   workspacePath: string,
-  config: RuntimeConfig,
+  options: StrictReviewOptions,
 ): Promise<StrictReviewValidationResult[]> {
-  const commands = strictReviewCommands(config);
+  const commands = strictReviewCommands(options);
   const results: StrictReviewValidationResult[] = [];
   for (const command of commands) {
     const result = await runShellCommand({
       command,
       cwd: workspacePath,
-      timeoutMs: config.STRICT_REVIEW_COMMAND_TIMEOUT_MS,
+      timeoutMs: options.commandTimeoutMs,
     });
     results.push(formatValidationResult(command, result));
   }
   return results;
 }
 
-function strictReviewCommands(config: RuntimeConfig): string[] {
-  const configured = splitCommands(config.STRICT_REVIEW_COMMANDS);
+function strictReviewCommands(options: StrictReviewOptions): string[] {
+  const configured = splitCommands(options.commands);
   if (configured.length > 0) return configured;
-  return [config.BUILDER_TEST_COMMAND, config.BUILDER_BUILD_COMMAND]
+  return [options.builderTestCommand, options.builderBuildCommand]
     .map((command) => command.trim())
     .filter(Boolean);
 }
