@@ -52,6 +52,7 @@ export async function runWithFailover(input: {
 }): Promise<CommandFailoverResult> {
   const attempts: CommandCandidateResult[] = [];
   const provider = input.provider ?? "CLI provider";
+  const isolationPolicy = input.isolationPolicy ?? defaultIsolationPolicy(provider, input.cwd);
 
   for (const command of input.commands) {
     const result = await runIsolatedCommand({
@@ -59,7 +60,7 @@ export async function runWithFailover(input: {
       cwd: input.cwd,
       input: input.input,
       timeoutMs: input.timeoutMs,
-      isolationPolicy: input.isolationPolicy,
+      isolationPolicy,
     });
     const classification = result.ok ? undefined : classifyProviderError({
       provider,
@@ -110,4 +111,25 @@ export function formatFailoverHeader(candidate: CommandCandidateResult): string 
     candidate.classification?.needsHuman ? "needs_human: true" : undefined,
     "",
   ].filter(Boolean).join("\n");
+}
+
+function defaultIsolationPolicy(provider: string, cwd?: string): RuntimeIsolationPolicy | undefined {
+  if (!cwd) return undefined;
+  if (provider === "Claude Code") {
+    return {
+      role: "director",
+      mode: "readonly",
+      projectRoot: cwd,
+      action: "review-or-plan",
+    };
+  }
+  if (provider === "Codex" || provider === "Factory CLI") {
+    return {
+      role: provider === "Codex" ? "builder" : "factory",
+      mode: "workspace-write",
+      projectRoot: cwd,
+      action: provider === "Codex" ? "implement" : "generate",
+    };
+  }
+  return undefined;
 }
