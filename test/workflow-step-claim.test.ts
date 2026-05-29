@@ -11,19 +11,41 @@ import { StepExecutor, claimRoleIdForAgentRole } from "../src/workflows/step-exe
 import { WorkerPoller } from "../src/worker/poller";
 
 const tempDirs: string[] = [];
+const stores: RuntimeStore[] = [];
 
 async function createTempRuntime(): Promise<{ store: RuntimeStore; vault: VaultManager; dir: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "agentrunner-step-claim-"));
   tempDirs.push(dir);
   const store = await RuntimeStore.open(path.join(dir, "runtime.sqlite"));
+  stores.push(store);
   const vault = new VaultManager(path.join(dir, "vault"));
   await vault.ensureDefaultFolders();
   return { store, vault, dir };
 }
 
 afterAll(async () => {
-  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  for (const store of stores) store.close();
+  Bun.gc(true);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await Promise.all(tempDirs.map(removeTempDir));
 });
+
+async function removeTempDir(dir: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!isBusyError(error) || attempt === 19) throw error;
+      Bun.gc(true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+}
+
+function isBusyError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "EBUSY";
+}
 
 function createMockAgent(output: string, ok = true): AgentAdapter {
   return {
@@ -232,5 +254,56 @@ describe("workflow step claim and executor", () => {
     expect(result.status).toBe("failed");
     expect(store.getWorkflowStepRun("TASK-CLAIM-4", "build")?.status).toBe("failed");
     expect(store.getTask("TASK-CLAIM-4")?.status).toBe("failed");
+  });
+
+  test("keeps a claimed workflow step lease alive while the agent runs", async () => {
+    const { store, vault, dir } = await createTempRuntime();
+    const workflowPlan = createDefaultWorkflowRegistry().plan(undefined, "implementation");
+    const config = loadConfig({
+      DATABASE_PATH: path.join(dir, "runtime.sqlite"),
+      OBSIDIAN_VAULT_PATH: path.join(dir, "vault"),
+      PROJECT_ROOT: dir,
+      CODEX_COMMAND: "mock-codex",
+      TASK_LEASE_MINUTES: "1",
+      WORKER_HEARTBEAT_INTERVAL_MS: "5",
+    });
+    let observedInitialExpiry = "";
+    let observedRefreshedExpiry = "";
+
+    store.createTask({
+      id: "TASK-CLAIM-5",
+      title: "Long running feature",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-CLAIM-5.md",
+      workflowPlan,
+    });
+    store.completeWorkflowStepRun({
+      taskId: "TASK-CLAIM-5",
+      stepId: "plan",
+      outputRef: "01_Tasks/TASK-CLAIM-5.md",
+    });
+
+    const result = await new StepExecutor({
+      role: "builder",
+      owner: "worker:builder",
+      store,
+      vault,
+      agent: {
+        role: "builder",
+        async run(): Promise<AgentRunResult> {
+          observedInitialExpiry = store.getWorkflowStepRun("TASK-CLAIM-5", "build")?.lockExpiresAt ?? "";
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          observedRefreshedExpiry = store.getWorkflowStepRun("TASK-CLAIM-5", "build")?.lockExpiresAt ?? "";
+          return { ok: true, output: "long running step completed" };
+        },
+      },
+      config,
+    }).runOnce();
+
+    expect(result.status).toBe("completed");
+    expect(observedInitialExpiry).not.toBe("");
+    expect(observedRefreshedExpiry).not.toBe("");
+    expect(observedRefreshedExpiry > observedInitialExpiry).toBe(true);
   });
 });

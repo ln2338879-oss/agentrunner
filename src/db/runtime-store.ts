@@ -156,6 +156,10 @@ export class RuntimeStore {
     return store;
   }
 
+  close(): void {
+    this.db.close();
+  }
+
   migrate(): void {
     this.db.exec(runtimeSchemaSql);
     this.db.exec(extendedRuntimeSchemaSql);
@@ -362,6 +366,33 @@ export class RuntimeStore {
       $owner: input.owner,
       $updatedAt: new Date().toISOString(),
     });
+  }
+
+  refreshWorkflowStepLease(input: {
+    taskId: string;
+    stepId: string;
+    owner: string;
+    ttlMinutes: number;
+    now?: string;
+  }): boolean {
+    const nowIso = input.now ?? new Date().toISOString();
+    const expiresAt = new Date(new Date(nowIso).getTime() + input.ttlMinutes * 60_000).toISOString();
+    const result = this.db.query(`
+      UPDATE workflow_step_runs
+      SET lock_expires_at = $expiresAt, updated_at = $nowIso
+      WHERE task_id = $taskId
+        AND step_id = $stepId
+        AND locked_by = $owner
+        AND status = 'running'
+    `).run({
+      $taskId: input.taskId,
+      $stepId: input.stepId,
+      $owner: input.owner,
+      $expiresAt: expiresAt,
+      $nowIso: nowIso,
+    });
+
+    return result.changes > 0;
   }
 
   updateWorkflowStepRun(input: {

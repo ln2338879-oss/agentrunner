@@ -47,12 +47,18 @@ export class StepExecutor {
     const reviewSafetyBefore = await this.captureReviewSafetyBefore(step);
 
     try {
-      let result = await this.options.agent.run({
-        taskId: step.taskId,
-        role: this.options.role,
-        prompt,
-        workspacePath: this.options.config.PROJECT_ROOT,
-      });
+      const stopLeaseRefresh = this.startWorkflowStepLeaseRefresh(step);
+      let result: AgentRunResult;
+      try {
+        result = await this.options.agent.run({
+          taskId: step.taskId,
+          role: this.options.role,
+          prompt,
+          workspacePath: this.options.config.PROJECT_ROOT,
+        });
+      } finally {
+        stopLeaseRefresh();
+      }
       result = await this.applyReviewSafetyResult(step, result, reviewSafetyBefore);
       let output = result.output || result.error || "Step execution returned no output.";
       const reportPath = stepReportPath(step, this.options.role);
@@ -172,6 +178,20 @@ export class StepExecutor {
       if (step) return step;
     }
     return null;
+  }
+
+  private startWorkflowStepLeaseRefresh(step: WorkflowStepRunRow): () => void {
+    const refresh = () => {
+      this.options.store.refreshWorkflowStepLease({
+        taskId: step.taskId,
+        stepId: step.stepId,
+        owner: this.options.owner,
+        ttlMinutes: this.options.config.TASK_LEASE_MINUTES,
+      });
+    };
+    const interval = setInterval(refresh, this.options.config.WORKER_HEARTBEAT_INTERVAL_MS);
+    interval.unref?.();
+    return () => clearInterval(interval);
   }
 
   private async buildRuntimePrompt(step: WorkflowStepRunRow): Promise<string> {

@@ -3,17 +3,21 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { RuntimeStore } from "../src/db/runtime-store";
+import { createDefaultWorkflowRegistry } from "../src/workflows/engine";
 
 const tempDirs: string[] = [];
+const stores: RuntimeStore[] = [];
 
 async function openStore(name: string): Promise<{ store: RuntimeStore; dir: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), `agentrunner-${name}-`));
   tempDirs.push(dir);
   const store = await RuntimeStore.open(path.join(dir, "runtime.sqlite"));
+  stores.push(store);
   return { store, dir };
 }
 
 afterAll(async () => {
+  for (const store of stores) store.close();
   await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -90,6 +94,51 @@ describe("RuntimeStore leases and recovery", () => {
     const recovered = store.recoverStaleTasks({ staleMinutes: 120 });
     expect(recovered.map((task) => task.id)).toContain("TASK-recover-1");
     expect(store.getTask("TASK-recover-1")?.status).toBe("blocked");
+  });
+
+  test("refreshes only the owning workflow step lease", async () => {
+    const { store } = await openStore("workflow-step-lease-refresh");
+    const workflowPlan = createDefaultWorkflowRegistry().plan(undefined, "implementation");
+    store.createTask({
+      id: "TASK-step-lease-refresh-1",
+      title: "Refresh workflow step lease",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-step-lease-refresh-1.md",
+      workflowPlan,
+    });
+    store.completeWorkflowStepRun({
+      taskId: "TASK-step-lease-refresh-1",
+      stepId: "plan",
+      outputRef: "01_Tasks/TASK-step-lease-refresh-1.md",
+      now: "2026-01-01T00:00:00.000Z",
+    });
+    store.claimReadyWorkflowStep({
+      roleId: "builder",
+      owner: "worker:builder:a",
+      ttlMinutes: 10,
+      now: "2026-01-01T00:00:01.000Z",
+    });
+
+    expect(store.refreshWorkflowStepLease({
+      taskId: "TASK-step-lease-refresh-1",
+      stepId: "build",
+      owner: "worker:builder:b",
+      ttlMinutes: 10,
+      now: "2026-01-01T00:05:00.000Z",
+    })).toBe(false);
+    expect(store.getWorkflowStepRun("TASK-step-lease-refresh-1", "build")?.lockExpiresAt)
+      .toBe("2026-01-01T00:10:01.000Z");
+
+    expect(store.refreshWorkflowStepLease({
+      taskId: "TASK-step-lease-refresh-1",
+      stepId: "build",
+      owner: "worker:builder:a",
+      ttlMinutes: 10,
+      now: "2026-01-01T00:05:00.000Z",
+    })).toBe(true);
+    expect(store.getWorkflowStepRun("TASK-step-lease-refresh-1", "build")?.lockExpiresAt)
+      .toBe("2026-01-01T00:15:00.000Z");
   });
 });
 
