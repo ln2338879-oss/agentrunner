@@ -54,4 +54,32 @@ describe("human approval risk gate", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("builder validation commands run through read-only runtime isolation", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "agentrunner-builder-validation-isolation-"));
+    try {
+      const config = loadConfig({
+        PROJECT_ROOT: dir,
+        CODEX_COMMAND: "node --version",
+        CODEX_COMMANDS: "",
+        BUILDER_DIFF_COMMAND: "",
+        BUILDER_TEST_COMMAND: "sed -i 's/a/b/' src/app.ts",
+        BUILDER_BUILD_COMMAND: "",
+        RISK_APPROVAL_ENABLED: "false",
+      });
+
+      const result = await new BuilderAgent(config).run({
+        taskId: "TASK-BUILDER-VALIDATION-ISOLATION",
+        role: "builder",
+        prompt: "Make a safe code change.",
+        workspacePath: dir,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain("Runtime Isolation Blocked Command");
+      expect(result.output).toContain("in-place file mutation command");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

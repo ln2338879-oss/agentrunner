@@ -9,6 +9,7 @@ import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../src/runtime
 import { WorkerPoller } from "../src/worker/poller";
 
 const tempDirs: string[] = [];
+const stores: RuntimeStore[] = [];
 
 class MockAgent implements AgentAdapter {
   constructor(
@@ -36,6 +37,7 @@ async function createFixture() {
   });
 
   const store = await RuntimeStore.open(config.DATABASE_PATH);
+  stores.push(store);
   const vault = new VaultManager(config.OBSIDIAN_VAULT_PATH);
   await vault.ensureDefaultFolders();
 
@@ -43,6 +45,9 @@ async function createFixture() {
 }
 
 afterAll(async () => {
+  for (const store of stores) store.close();
+  Bun.gc(true);
+  await new Promise((resolve) => setTimeout(resolve, 50));
   await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -148,5 +153,50 @@ describe("WorkerPoller", () => {
     expect(result.error).toBe("mock builder failed");
     expect(fixture.store.getTask("TASK-worker-3")?.status).toBe("failed");
     expect(fixture.store.getTask("TASK-worker-3")?.lockedBy).toBeNull();
+  });
+
+  test("keeps a claimed legacy task lease alive while the agent runs", async () => {
+    const fixture = await createFixture();
+    const config = loadConfig({
+      PROJECT_ROOT: path.join(fixture.dir, "project"),
+      OBSIDIAN_VAULT_PATH: path.join(fixture.dir, "vault"),
+      DATABASE_PATH: path.join(fixture.dir, "runtime.sqlite"),
+      TASK_LEASE_MINUTES: "1",
+      WORKER_HEARTBEAT_INTERVAL_MS: "5",
+    });
+    let observedInitialExpiry = "";
+    let observedRefreshedExpiry = "";
+
+    fixture.store.createTask({
+      id: "TASK-worker-4",
+      title: "Long running legacy task",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-worker-4.md",
+    });
+
+    const poller = new WorkerPoller({
+      role: "builder",
+      owner: "worker:test:builder",
+      store: fixture.store,
+      vault: fixture.vault,
+      agent: {
+        role: "builder",
+        async run(): Promise<AgentRunResult> {
+          observedInitialExpiry = fixture.store.getTask("TASK-worker-4")?.lockExpiresAt ?? "";
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          observedRefreshedExpiry = fixture.store.getTask("TASK-worker-4")?.lockExpiresAt ?? "";
+          return { ok: true, output: "long running task completed" };
+        },
+      },
+      config,
+    });
+
+    const result = await poller.pollOnce();
+
+    expect(result.status).toBe("completed");
+    expect(observedInitialExpiry).not.toBe("");
+    expect(observedRefreshedExpiry).not.toBe("");
+    expect(observedRefreshedExpiry > observedInitialExpiry).toBe(true);
   });
 });

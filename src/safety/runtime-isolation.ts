@@ -80,7 +80,9 @@ function assessCommandShape(input: { command: string; policy: RuntimeIsolationPo
     };
   }
 
-  const shellRiskSignals = shellRiskSignalsFor(command);
+  const shellRiskSignals = shellRiskSignalsFor(command).filter(
+    (signal) => !(input.policy.action === "validate" && signal === "compound shell expression"),
+  );
   if (shellRiskSignals.length > 0) {
     return {
       ok: false,
@@ -100,6 +102,8 @@ function writeOperationSignals(command: string): string[] {
     [/\b(package\.json|bun\.lockb?|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)\b/i, "package or lockfile target"],
     [/(^|\s)>\s*[^\s]/, "shell output redirection"],
     [/(^|\s)>>\s*[^\s]/, "shell append redirection"],
+    [/\b(sed|perl)\b(?=[^;&|]*\s-i(?:\s|$))/i, "in-place file mutation command"],
+    [/\btee\s+(?:-[a-zA-Z]+\s+)*[^\s|;&]+/i, "in-place file mutation command"],
   ];
   return checks.filter(([pattern]) => pattern.test(command)).map(([, signal]) => signal);
 }

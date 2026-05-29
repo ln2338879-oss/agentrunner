@@ -21,6 +21,27 @@ describe("runtime isolation", () => {
     expect(decision.signals).toContain("git write or publish operation");
   });
 
+  test("blocks in-place file mutation commands in read-only director policy", () => {
+    const projectRoot = path.resolve("/tmp/agentrunner-project");
+    const policy = {
+      role: "director" as const,
+      mode: "readonly" as const,
+      projectRoot,
+      action: "review",
+    };
+
+    for (const command of ["sed -i 's/a/b/' src/app.ts", "perl -i -pe 's/a/b/' src/app.ts", "tee src/app.ts"]) {
+      const decision = assessRuntimeIsolation({
+        command,
+        cwd: projectRoot,
+        policy,
+      });
+
+      expect(decision.ok).toBe(false);
+      expect(decision.signals).toContain("in-place file mutation command");
+    }
+  });
+
   test("blocks commands outside the project root", () => {
     const projectRoot = path.resolve("/tmp/agentrunner-project");
     const decision = assessRuntimeIsolation({
@@ -48,6 +69,22 @@ describe("runtime isolation", () => {
         mode: "workspace-write",
         projectRoot,
         action: "implement",
+      },
+    });
+
+    expect(decision.ok).toBe(true);
+  });
+
+  test("allows compound read-only validation commands inside the project root", () => {
+    const projectRoot = path.resolve("/tmp/agentrunner-project");
+    const decision = assessRuntimeIsolation({
+      command: "git diff --stat && git diff --name-only",
+      cwd: projectRoot,
+      policy: {
+        role: "builder",
+        mode: "readonly",
+        projectRoot,
+        action: "validate",
       },
     });
 

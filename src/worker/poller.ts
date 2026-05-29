@@ -40,6 +40,7 @@ export class WorkerPoller {
 
     const startedAt = new Date().toISOString();
     const prompt = this.options.store.getTaskPrompt(task.id);
+    const stopLeaseRefresh = this.startTaskLeaseRefresh(task.id);
 
     try {
       const result = await this.options.agent.run({
@@ -127,7 +128,22 @@ export class WorkerPoller {
         status: "failed",
         error: message,
       };
+    } finally {
+      stopLeaseRefresh();
     }
+  }
+
+  private startTaskLeaseRefresh(taskId: string): () => void {
+    const refresh = () => {
+      this.options.store.refreshTaskLease({
+        taskId,
+        owner: this.options.owner,
+        ttlMinutes: this.options.config.TASK_LEASE_MINUTES,
+      });
+    };
+    const interval = setInterval(refresh, this.options.config.WORKER_HEARTBEAT_INTERVAL_MS);
+    interval.unref?.();
+    return () => clearInterval(interval);
   }
 }
 

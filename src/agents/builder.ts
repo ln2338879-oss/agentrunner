@@ -2,8 +2,8 @@ import type { RuntimeConfig } from "../config";
 import { formatHumanEscalation } from "../providers/error-classifier";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
 import { assessHumanApprovalRisk, formatHumanApprovalRiskReport } from "../safety/risk-gate";
+import { runIsolatedCommand } from "../utils/isolated-command";
 import { buildCliPrompt } from "../utils/prompt";
-import { runShellCommand } from "../utils/command";
 import { formatFailoverHeader, parseCommandCandidates, runCommandWithFailover } from "./failover";
 
 export class BuilderAgent implements AgentAdapter {
@@ -107,10 +107,16 @@ export class BuilderAgent implements AgentAdapter {
 }
 
 async function runOptionalStep(label: string, command: string, cwd: string): Promise<string> {
-  const result = await runShellCommand({
+  const result = await runIsolatedCommand({
     command,
     cwd,
     timeoutMs: 600000,
+    isolationPolicy: {
+      role: "builder",
+      mode: "readonly",
+      projectRoot: cwd,
+      action: "validate",
+    },
   });
 
   const status = result.ok ? "PASSED" : "VALIDATION_FAILED";
