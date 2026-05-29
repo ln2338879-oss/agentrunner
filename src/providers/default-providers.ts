@@ -4,12 +4,17 @@ import { DirectorAgent } from "../agents/director";
 import { FactoryAgent } from "../agents/factory";
 import type { RuntimeConfig } from "../config";
 import type { AgentAdapter, AgentRole } from "../runtime/types";
+import { withTaskWorkspaceIsolation } from "../safety/workspace-agent";
 import type { AgentProviderFactory, AgentProviderFactoryInput, ProviderHealth, ProviderKind } from "./types";
 
 function assertRole(input: AgentProviderFactoryInput, expected: AgentRole): void {
   if (input.role !== expected) {
     throw new Error(`Provider ${input.roleDefinition?.provider ?? "unknown"} cannot create agent for role ${input.role}; expected ${expected}.`);
   }
+}
+
+function isolated(agent: AgentAdapter, config: RuntimeConfig): AgentAdapter {
+  return withTaskWorkspaceIsolation(agent, config);
 }
 
 function imageProviderHealth(config: RuntimeConfig, id: "nanobanana" | "gemini-image", kind: ProviderKind): ProviderHealth {
@@ -28,7 +33,7 @@ export const ClaudeCodeProviderFactory: AgentProviderFactory = {
   kind: "claude-code",
   createAgent(input: AgentProviderFactoryInput): AgentAdapter {
     assertRole(input, "director");
-    return new DirectorAgent(input.config);
+    return isolated(new DirectorAgent(input.config), input.config);
   },
   async healthCheck(config): Promise<ProviderHealth> {
     return {
@@ -45,7 +50,7 @@ export const CodexProviderFactory: AgentProviderFactory = {
   kind: "codex",
   createAgent(input: AgentProviderFactoryInput): AgentAdapter {
     assertRole(input, "builder");
-    return new BuilderAgent(input.config);
+    return isolated(new BuilderAgent(input.config), input.config);
   },
   async healthCheck(config): Promise<ProviderHealth> {
     return {
@@ -62,7 +67,7 @@ export const OllamaProviderFactory: AgentProviderFactory = {
   kind: "ollama",
   createAgent(input: AgentProviderFactoryInput): AgentAdapter {
     assertRole(input, "factory");
-    return new FactoryAgent(input.config);
+    return isolated(new FactoryAgent(input.config), input.config);
   },
   async healthCheck(config): Promise<ProviderHealth> {
     return {
@@ -81,7 +86,7 @@ export const NanoBananaProviderFactory: AgentProviderFactory = {
   kind: "nanobanana",
   createAgent(input: AgentProviderFactoryInput): AgentAdapter {
     assertRole(input, "designer");
-    return new DesignerAgent(input.config);
+    return isolated(new DesignerAgent(input.config), input.config);
   },
   async healthCheck(config): Promise<ProviderHealth> {
     return imageProviderHealth(config, "nanobanana", "nanobanana");
@@ -93,7 +98,7 @@ export const GeminiImageProviderFactory: AgentProviderFactory = {
   kind: "gemini-image",
   createAgent(input: AgentProviderFactoryInput): AgentAdapter {
     assertRole(input, "designer");
-    return new DesignerAgent(input.config);
+    return isolated(new DesignerAgent(input.config), input.config);
   },
   async healthCheck(config): Promise<ProviderHealth> {
     return imageProviderHealth(config, "gemini-image", "gemini-image");
