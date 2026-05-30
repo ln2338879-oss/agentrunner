@@ -10,6 +10,7 @@ import { parseReviewVerdict } from "../src/review/verdict";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../src/runtime/types";
 
 const tempDirs: string[] = [];
+const stores: RuntimeStore[] = [];
 
 class MockDirector implements AgentAdapter {
   readonly role = "director" as const;
@@ -28,15 +29,19 @@ async function createReviewFixture(): Promise<{
 }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "agentrunner-review-"));
   tempDirs.push(dir);
+  const store = await RuntimeStore.open(path.join(dir, "runtime.sqlite"));
+  stores.push(store);
+
   return {
-    store: await RuntimeStore.open(path.join(dir, "runtime.sqlite")),
+    store,
     vault: new VaultManager(path.join(dir, "vault")),
     projectRoot: path.join(dir, "project"),
   };
 }
 
 afterAll(async () => {
-  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  for (const store of stores) store.close();
+  await Promise.allSettled(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })));
 });
 
 describe("parseReviewVerdict", () => {

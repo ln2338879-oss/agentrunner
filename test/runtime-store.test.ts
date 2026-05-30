@@ -18,10 +18,16 @@ async function openStore(name: string): Promise<{ store: RuntimeStore; dir: stri
 
 afterAll(async () => {
   for (const store of stores) store.close();
-  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.allSettled(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })));
 });
 
 describe("RuntimeStore task lifecycle", () => {
+  test("exposes explicit close for test and process cleanup", async () => {
+    const { store } = await openStore("close");
+    expect(typeof store.close).toBe("function");
+    store.close();
+  });
+
   test("migrates and creates a task", async () => {
     const { store } = await openStore("task");
 

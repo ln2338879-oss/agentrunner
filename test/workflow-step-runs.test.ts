@@ -6,15 +6,19 @@ import { RuntimeStore } from "../src/db/runtime-store";
 import { createDefaultWorkflowRegistry } from "../src/workflows/engine";
 
 const tempDirs: string[] = [];
+const stores: RuntimeStore[] = [];
 
 async function createTempStore(): Promise<RuntimeStore> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "agentrunner-workflow-steps-"));
   tempDirs.push(dir);
-  return RuntimeStore.open(path.join(dir, "runtime.sqlite"));
+  const store = await RuntimeStore.open(path.join(dir, "runtime.sqlite"));
+  stores.push(store);
+  return store;
 }
 
 afterAll(async () => {
-  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  for (const store of stores) store.close();
+  await Promise.allSettled(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })));
 });
 
 describe("workflow step runs", () => {

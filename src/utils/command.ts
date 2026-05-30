@@ -14,13 +14,25 @@ export interface RunShellCommandOptions {
 }
 
 export async function runShellCommand(options: RunShellCommandOptions): Promise<ShellCommandResult> {
-  const shell = process.platform === "win32" ? ["cmd", "/d", "/s", "/c", options.command] : ["sh", "-lc", options.command];
-  const proc = Bun.spawn(shell, {
-    cwd: options.cwd,
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const shell = process.platform === "win32" ? [process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe", "/d", "/s", "/c", options.command] : ["sh", "-lc", options.command];
+  let proc: any;
+  try {
+    proc = Bun.spawn(shell, {
+      cwd: options.cwd,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      exitCode: null,
+      stdout: "",
+      stderr: message,
+      timedOut: false,
+    };
+  }
 
   if (options.input && proc.stdin) {
     proc.stdin.write(options.input);

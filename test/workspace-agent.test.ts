@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { loadConfig } from "../src/config";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../src/runtime/types";
 import { withTaskWorkspaceIsolation } from "../src/safety/workspace-agent";
@@ -25,7 +26,7 @@ describe("task workspace agent wrapper", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(captured?.workspacePath).toBe("/tmp/agentrunner-project");
+    expect(captured?.workspacePath).toBe(path.resolve(config.PROJECT_ROOT));
     expect(captured?.prompt).toContain("Runtime Workspace");
     expect(captured?.prompt).toContain("workspace_mode: project-root");
   });

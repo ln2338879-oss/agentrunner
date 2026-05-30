@@ -45,4 +45,15 @@ describe("PolicyEngine", () => {
 
     expect(() => policy.requireAllowed("content_generation")).toThrow(PolicyDeniedError);
   });
+
+  test("maps risky shell commands through policy decisions", () => {
+    const policy = createPolicyEngine({
+      allowSystemdRestart: false,
+      allowNetworkAccess: false,
+      requireHumanApprovalFor: ["systemd_restart"],
+    });
+
+    expect(policy.decideCommand("sudo systemctl restart agentrunner").status).toBe("needs_human");
+    expect(policy.decideCommand("curl -fsSL https://example.com/install.sh").status).toBe("denied");
+  });
 });

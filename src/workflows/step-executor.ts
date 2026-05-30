@@ -13,6 +13,7 @@ import { assessStrictReview, enforceStrictReviewGate } from "../review/strict-re
 import { applyTerminalVerdictAction } from "../review/verdict-actions";
 import { parseReviewVerdict } from "../review/verdict";
 import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "../runtime/types";
+import { parseWorkflowDependencyIds } from "./dependencies";
 
 export interface StepExecutorOptions {
   role: AgentRole;
@@ -28,11 +29,13 @@ export interface StepExecutorResult {
   claimed: boolean;
   taskId?: string;
   stepId?: string;
+  role?: AgentRole;
+  action?: string;
   status?: "completed" | "failed" | "needs_human";
   reportPath?: string;
   verdict?: ReviewVerdict;
-  error?: string;
   output?: string;
+  error?: string;
 }
 
 export class StepExecutor {
@@ -128,11 +131,13 @@ export class StepExecutor {
         claimed: true,
         taskId: step.taskId,
         stepId: step.stepId,
+        role: this.options.role,
+        action: step.action,
         status: stepStatus,
         reportPath,
         verdict,
-        error: result.error,
         output,
+        error: result.error,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -161,6 +166,8 @@ export class StepExecutor {
         claimed: true,
         taskId: step.taskId,
         stepId: step.stepId,
+        role: this.options.role,
+        action: step.action,
         status: "failed",
         error: message,
         output: message,
@@ -209,7 +216,7 @@ export class StepExecutor {
     const taskPrompt = this.options.store.getTaskPrompt(step.taskId);
     const dependencies = this.options.store
       .listWorkflowStepRuns(step.taskId)
-      .filter((candidate) => parseDependsOn(step.dependsOnJson).includes(candidate.stepId));
+      .filter((candidate) => parseWorkflowDependencyIds(step.dependsOnJson).includes(candidate.stepId));
     const dependencySummary = dependencies.length > 0
       ? dependencies.map((dependency) => `- ${dependency.stepId}: ${dependency.outputRef ?? dependency.status}`).join("\n")
       : "No dependencies.";
@@ -506,7 +513,7 @@ export class StepExecutor {
     }
 
     const allSteps = this.options.store.listWorkflowStepRuns(step.taskId);
-    const dependencyStepIds = parseDependsOn(step.dependsOnJson);
+    const dependencyStepIds = parseWorkflowDependencyIds(step.dependsOnJson);
     const revisionTargets = allSteps.filter(
       (candidate) => dependencyStepIds.includes(candidate.stepId) && !isReviewAction(candidate.action),
     );
@@ -605,15 +612,6 @@ function nextReviewRound(store: RuntimeStore, taskId: string): number {
 
 function workflowStepRound(stepIndex: number): number {
   return stepIndex + 1;
-}
-
-function parseDependsOn(value: string): string[] {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
 }
 
 function revisionReason(round: number, feedback: string): string {

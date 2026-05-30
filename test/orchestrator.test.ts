@@ -9,6 +9,7 @@ import { Orchestrator } from "../src/runtime/orchestrator";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../src/runtime/types";
 
 const tempDirs: string[] = [];
+const stores: RuntimeStore[] = [];
 
 class MockAgent implements AgentAdapter {
   constructor(
@@ -32,16 +33,20 @@ async function createFixture() {
     RECOVER_STALE_TASKS_ON_START: "false",
   });
 
+  const store = await RuntimeStore.open(config.DATABASE_PATH);
+  stores.push(store);
+
   return {
     dir,
     config,
-    store: await RuntimeStore.open(config.DATABASE_PATH),
+    store,
     vault: new VaultManager(config.OBSIDIAN_VAULT_PATH),
   };
 }
 
 afterAll(async () => {
-  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  for (const store of stores) store.close();
+  await Promise.allSettled(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })));
 });
 
 describe("Orchestrator smoke test", () => {
@@ -74,16 +79,19 @@ describe("Orchestrator smoke test", () => {
     await orchestrator.initialize();
 
     const result = await orchestrator.handleUserRequest({
-      content: "Implement inventory drag and drop UI system.",
+      content: "Build inventory drag and drop UI system code.",
       discordChannelId: "discord-channel-1",
       discordMessageId: "discord-message-1",
     });
 
     expect(result.verdict).toBe("APPROVED");
+    expect(result.reportPath).toBe(`05_BuilderReports/${result.taskId}-build-builder-step.md`);
     expect(result.approvedPath).toContain("07_Approved");
 
     const task = fixture.store.getTask(result.taskId);
     expect(task?.status).toBe("approved");
+
+    expect(fixture.store.listTaskRuns(result.taskId).map((run) => run.role)).toEqual(["director", "builder", "director"]);
 
     const reviews = fixture.store.listTaskReviews(result.taskId);
     expect(reviews).toHaveLength(1);

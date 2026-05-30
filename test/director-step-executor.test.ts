@@ -10,11 +10,13 @@ import { createDefaultWorkflowRegistry } from "../src/workflows/engine";
 import { StepExecutor, claimRoleIdsForAgentRole } from "../src/workflows/step-executor";
 
 const tempDirs: string[] = [];
+const stores: RuntimeStore[] = [];
 
 async function createRuntime() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "agentrunner-director-step-"));
   tempDirs.push(dir);
   const store = await RuntimeStore.open(path.join(dir, "runtime.sqlite"));
+  stores.push(store);
   const vault = new VaultManager(path.join(dir, "vault"));
   await vault.ensureDefaultFolders();
   const config = loadConfig({
@@ -27,7 +29,8 @@ async function createRuntime() {
 }
 
 afterAll(async () => {
-  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  for (const store of stores) store.close();
+  await Promise.allSettled(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })));
 });
 
 function directorAgent(output: string, ok = true): AgentAdapter {
@@ -93,7 +96,8 @@ function completePlanAndBuild(store: RuntimeStore, taskId: string): void {
 }
 
 function git(dir: string, command: string): void {
-  const result = Bun.spawnSync(["sh", "-lc", command], { cwd: dir });
+  const shell = process.platform === "win32" ? [process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe", "/d", "/s", "/c", command] : ["sh", "-lc", command];
+  const result = Bun.spawnSync(shell, { cwd: dir });
   if (result.exitCode !== 0) {
     throw new Error(new TextDecoder().decode(result.stderr));
   }

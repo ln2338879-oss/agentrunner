@@ -4,11 +4,9 @@ import { RuntimeStore } from "../db/runtime-store";
 import type { RuntimeNotifier } from "../discord/notifier";
 import { NullNotifier } from "../discord/notifier";
 import type { GroupConfigManager } from "../groups/group-config";
-import { botReportNote, taskNote } from "../obsidian/templates";
+import { taskNote } from "../obsidian/templates";
 import { VaultManager } from "../obsidian/vault-manager";
 import { createPolicyEngine, type PolicyEngine } from "../policies/engine";
-import { runDirectorReview } from "../review/review-loop";
-import { applyTerminalVerdictAction } from "../review/verdict-actions";
 import { RoleRegistry } from "../roles/registry";
 import { classifyTask } from "../router/classify";
 import { planWorkflowForTask } from "../router/workflow-routing";
@@ -16,9 +14,10 @@ import { loadSkillContext } from "../skills/context";
 import { runShellCommand } from "../utils/command";
 import { appendVisionAnalysis } from "../vision/adapter";
 import { WorkflowRegistry } from "../workflows/engine";
-import type { PlannedWorkflowStep, WorkflowPlan } from "../workflows/types";
+import { StepScheduler, type StepSchedulerCycleResult } from "../workflows/step-scheduler";
+import type { WorkflowPlan } from "../workflows/types";
 import { runStartupRecovery } from "./startup-recovery";
-import type { AgentAdapter, AgentRole, AgentRunResult, ReviewVerdict } from "./types";
+import type { AgentAdapter, AgentRole, ReviewVerdict } from "./types";
 
 export interface OrchestratorResult {
   taskId: string;
@@ -163,14 +162,6 @@ export class Orchestrator {
           workflowPlan,
         }),
       );
-      completeSyntheticPlanningSteps({
-        store: this.store,
-        taskId,
-        workflowPlan,
-        assignedTo: classified.assignedTo,
-        outputRef: obsidianPath,
-      });
-
       await this.notifier.taskCreated({
         taskId,
         role: classified.assignedTo,
@@ -178,257 +169,117 @@ export class Orchestrator {
         content: input.content,
       });
 
-      const agent = this.requireAgent(classified.assignedTo);
-      const workerStep = primaryWorkerStepForRole(workflowPlan, classified.assignedTo);
-      const reviewStep = workflowPlan.steps.find((step) => step.action === "review");
-      let prompt = effectiveContent;
-      let latestReportPath = "";
-      let latestReviewPath: string | undefined;
-      let latestVerdict: ReviewVerdict | undefined;
-      let latestResult: AgentRunResult | undefined;
-
-      for (let round = 1; round <= this.config.MAX_REVIEW_ROUNDS; round += 1) {
-        this.store.refreshTaskLease({
-          taskId,
-          owner: leaseOwner,
-          ttlMinutes: this.config.TASK_LEASE_MINUTES,
-        });
-
-        this.store.updateTaskStatus(taskId, "running");
-        prompt = appendSteeringContext(prompt, this.store.consumeSteeringMessages(taskId));
-        markWorkflowStep(this.store, taskId, workerStep, "running");
-        const result = await this.runWorkerRound({
-          taskId,
-          role: classified.assignedTo,
-          agent,
-          prompt,
-          round,
-        });
-        latestResult = result.result;
-        latestReportPath = result.reportPath;
-
-        if (!result.result.ok) {
-          markWorkflowStep(this.store, taskId, workerStep, "failed", {
-            outputRef: latestReportPath,
-            error: result.result.error ?? "Worker failed.",
-          });
-          if (result.result.needsHuman) {
-            this.store.updateTaskStatus(taskId, "needs_human");
-            this.store.recordRuntimeEvent({
-              kind: "human_intervention_required",
-              taskId,
-              owner: leaseOwner,
-              message: result.result.error ?? "Provider requires human intervention.",
-              metadata: {
-                role: classified.assignedTo,
-                errorKind: result.result.errorKind,
-                reportPath: latestReportPath,
-              },
-            });
-            await this.notifier.blocked({
-              taskId,
-              reviewPath: latestReportPath,
-              reason: result.result.error ?? "Provider requires human intervention.",
-            });
-          } else {
-            this.store.updateTaskStatus(taskId, "failed");
-            await this.notifier.failed({ taskId, reportPath: latestReportPath, reason: result.result.error });
-          }
-          return {
-            taskId,
-            assignedTo: classified.assignedTo,
-            obsidianPath,
-            reportPath: latestReportPath,
-            finalOutput: result.result.output || result.result.error,
-          };
-        }
-
-        markWorkflowStep(this.store, taskId, workerStep, "completed", { outputRef: latestReportPath });
-        markWorkflowStep(this.store, taskId, reviewStep, "running");
-        const review = await runDirectorReview({
-          taskId,
-          originalPrompt: effectiveContent,
-          workerRole: classified.assignedTo,
-          workerOutput: result.result.output,
-          director: this.requireAgent("director"),
-          store: this.store,
-          vault: this.vault,
-          config: this.config,
-          round,
-        });
-
-        latestReviewPath = review.path;
-        latestVerdict = review.verdict;
-        markWorkflowStep(this.store, taskId, reviewStep, "completed", { outputRef: review.path });
-        this.store.setTaskReviewRound(taskId, round);
-        this.store.recordArtifact({
-          id: `ART-${taskId}-review-r${round}-${Date.now()}`,
-          taskId,
-          type: "director_review",
-          path: review.path,
-          createdBy: "director",
-        });
-        await this.notifier.reviewResult({ taskId, verdict: review.verdict, reviewPath: review.path, round });
-
-        if (review.verdict === "APPROVED") {
-          markPendingWorkflowSteps(this.store, taskId, workflowPlan, "skipped", "Workflow completed before optional steps were needed.");
-          this.store.updateTaskStatus(taskId, "approved");
-          const approvedPath = await this.writeApprovedSummary({
-            taskId,
-            role: classified.assignedTo,
-            reportPath: latestReportPath,
-            reviewPath: latestReviewPath,
-            output: result.result.output,
-          });
-          await this.runApprovedTaskCommand({
-            taskId,
-            reportPath: latestReportPath,
-            reviewPath: latestReviewPath,
-            policyEngine,
-          });
-          await this.notifier.approved({
-            taskId,
-            approvedPath,
-            reportPath: latestReportPath,
-            reviewPath: latestReviewPath,
-          });
-          return {
-            taskId,
-            assignedTo: classified.assignedTo,
-            obsidianPath,
-            reportPath: latestReportPath,
-            reviewPath: latestReviewPath,
-            approvedPath,
-            verdict: latestVerdict,
-            finalOutput: result.result.output,
-          };
-        }
-
-        if (review.verdict !== "NEEDS_REVISION") {
-          markPendingWorkflowSteps(this.store, taskId, workflowPlan, "skipped", `Stopped after terminal verdict ${review.verdict}.`);
-          await applyTerminalVerdictAction({
-            store: this.store,
-            vault: this.vault,
-            notifier: this.notifier,
-            taskId,
-            verdict: review.verdict,
-            feedback: review.output,
-            reviewPath: latestReviewPath,
-            owner: leaseOwner,
-            sourceStepId: reviewStep?.id,
-          });
-          return {
-            taskId,
-            assignedTo: classified.assignedTo,
-            obsidianPath,
-            reportPath: latestReportPath,
-            reviewPath: latestReviewPath,
-            verdict: latestVerdict,
-            finalOutput: result.result.output,
-          };
-        }
-
-        this.store.updateTaskStatus(taskId, "needs_revision");
-        prompt = buildRevisionPrompt({
-          originalPrompt: effectiveContent,
-          previousOutput: result.result.output,
-          reviewFeedback: review.output,
-          round,
-        });
-      }
-
-      markPendingWorkflowSteps(this.store, taskId, workflowPlan, "failed", `Exceeded MAX_REVIEW_ROUNDS=${this.config.MAX_REVIEW_ROUNDS}`);
-      this.store.updateTaskStatus(taskId, "failed");
-      await this.notifier.failed({
+      const workflowResult = await this.runInlineWorkflow({
         taskId,
-        reportPath: latestReportPath,
-        reason: `Exceeded MAX_REVIEW_ROUNDS=${this.config.MAX_REVIEW_ROUNDS}`,
+        workflowPlan,
+        assignedTo: classified.assignedTo,
+        leaseOwner,
       });
-      return {
+      return await this.buildHandleResult({
         taskId,
         assignedTo: classified.assignedTo,
         obsidianPath,
-        reportPath: latestReportPath,
-        reviewPath: latestReviewPath,
-        verdict: latestVerdict ?? (latestResult?.ok ? "NEEDS_REVISION" : "BLOCKED"),
-        finalOutput: latestResult?.output,
-      };
+        workflowResult,
+        policyEngine,
+      });
     } finally {
       this.store.releaseTaskLease({ taskId, owner: leaseOwner });
     }
   }
 
-  private async runWorkerRound(input: {
+  private async runInlineWorkflow(input: {
     taskId: string;
-    role: AgentRole;
-    agent: AgentAdapter;
-    prompt: string;
-    round: number;
-  }): Promise<{ result: AgentRunResult; reportPath: string }> {
-    const startedAt = new Date().toISOString();
-    const result = await input.agent.run({
-      taskId: input.taskId,
-      role: input.role,
-      prompt: input.prompt,
-      workspacePath: this.config.PROJECT_ROOT,
+    workflowPlan: WorkflowPlan;
+    assignedTo: AgentRole;
+    leaseOwner: string;
+  }): Promise<InlineWorkflowSummary> {
+    const scheduler = new StepScheduler({
+      store: this.store,
+      vault: this.vault,
+      config: this.config,
+      agents: [...this.agents.values()],
+      ownerPrefix: input.leaseOwner,
+      maxStepsPerCycle: Math.max(input.workflowPlan.steps.length + this.config.MAX_REVIEW_ROUNDS, 1),
+      notifier: this.notifier,
     });
+    const cycle = await scheduler.runCycle();
 
-    this.store.recordTaskRun({
-      id: `RUN-${input.taskId}-${input.role}-r${input.round}-${Date.now()}`,
-      taskId: input.taskId,
-      role: input.role,
-      model: this.modelNameFor(input.role),
-      prompt: input.prompt,
-      output: result.output,
-      status: result.ok ? "completed" : "failed",
-      error: result.error,
-      startedAt,
-      finishedAt: new Date().toISOString(),
-    });
-
-    const reportFolder = reportFolderForRole(input.role);
-    const reportPath = `${reportFolder}/${input.taskId}-${input.role}-round-${input.round}.md`;
-
-    await this.vault.writeNote(
-      reportPath,
-      botReportNote({
+    for (const _result of cycle.results) {
+      this.store.refreshTaskLease({
         taskId: input.taskId,
-        role: input.role,
-        status: result.ok ? "ready_for_review" : result.needsHuman ? "needs_human" : "failed",
-        body: [
-          result.errorKind ? `Error kind: ${result.errorKind}` : "",
-          result.needsHuman ? "Human intervention required: true" : "",
-          "",
-          result.output,
-          result.error ? `\n## Error\n\n${result.error}` : "",
-        ].filter(Boolean).join("\n"),
-      }),
-    );
-
-    this.store.recordArtifact({
-      id: `ART-${input.taskId}-${input.role}-r${input.round}-${Date.now()}`,
-      taskId: input.taskId,
-      type: result.needsHuman ? "human_intervention" : "agent_report",
-      path: reportPath,
-      createdBy: input.role,
-    });
-    for (const artifact of result.artifacts ?? []) {
-      this.store.recordArtifact({
-        id: `ART-${input.taskId}-${input.role}-file-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        taskId: input.taskId,
-        type: input.role === "designer" ? "design_image" : "agent_file",
-        path: artifact,
-        createdBy: input.role,
+        owner: input.leaseOwner,
+        ttlMinutes: this.config.TASK_LEASE_MINUTES,
       });
     }
-    await this.notifier.workerReport({
-      taskId: input.taskId,
-      role: input.role,
-      reportPath,
-      round: input.round,
-    });
 
-    return { result, reportPath };
+    return summarizeInlineWorkflow(input.assignedTo, cycle);
+  }
+
+  private async buildHandleResult(input: {
+    taskId: string;
+    assignedTo: AgentRole;
+    obsidianPath: string;
+    workflowResult: InlineWorkflowSummary;
+    policyEngine: PolicyEngine;
+  }): Promise<OrchestratorResult> {
+    const latestReportPath = input.workflowResult.reportPath ?? input.obsidianPath;
+    const latestReviewPath = input.workflowResult.reviewPath;
+    const latestVerdict = input.workflowResult.verdict;
+    const latestOutput = input.workflowResult.output;
+    const task = this.store.getTask(input.taskId);
+
+    if (task?.status === "approved" && latestVerdict === "APPROVED") {
+      const approvedPath = await this.writeApprovedSummary({
+        taskId: input.taskId,
+        role: input.assignedTo,
+        reportPath: latestReportPath,
+        reviewPath: latestReviewPath ?? latestReportPath,
+        output: latestOutput ?? "",
+      });
+      await this.runApprovedTaskCommand({
+        taskId: input.taskId,
+        reportPath: latestReportPath,
+        reviewPath: latestReviewPath ?? latestReportPath,
+        policyEngine: input.policyEngine,
+      });
+      await this.notifier.approved({
+        taskId: input.taskId,
+        approvedPath,
+        reportPath: latestReportPath,
+        reviewPath: latestReviewPath ?? latestReportPath,
+      });
+      return {
+        taskId: input.taskId,
+        assignedTo: input.assignedTo,
+        obsidianPath: input.obsidianPath,
+        reportPath: latestReportPath,
+        reviewPath: latestReviewPath,
+        approvedPath,
+        verdict: latestVerdict,
+        finalOutput: latestOutput,
+      };
+    }
+
+    if (task?.status === "failed") {
+      await this.notifier.failed({
+        taskId: input.taskId,
+        reportPath: latestReportPath,
+        reason: input.workflowResult.error,
+      });
+    } else if (!latestVerdict && input.workflowResult.processed === 0) {
+      this.store.updateTaskStatus(input.taskId, "blocked");
+      await this.notifier.blocked({ taskId: input.taskId, reason: "No workflow step could be executed." });
+    }
+
+    return {
+      taskId: input.taskId,
+      assignedTo: input.assignedTo,
+      obsidianPath: input.obsidianPath,
+      reportPath: latestReportPath,
+      reviewPath: latestReviewPath,
+      verdict: latestVerdict,
+      finalOutput: input.workflowResult.error ?? latestOutput,
+    };
   }
 
   private async writeApprovedSummary(input: {
@@ -479,7 +330,9 @@ export class Orchestrator {
     policyEngine: PolicyEngine;
   }): Promise<void> {
     if (!this.config.APPROVED_TASK_COMMAND) return;
-    const decision = input.policyEngine.decide("approved_task_command");
+    const decision = input.policyEngine.decideCommand(this.config.APPROVED_TASK_COMMAND, {
+      baseAction: "approved_task_command",
+    });
     if (decision.status !== "allowed") {
       const path = `07_Approved/${input.taskId}-approved-command-policy.md`;
       await this.vault.writeNote(
@@ -550,125 +403,30 @@ export class Orchestrator {
       createdBy: "director",
     });
   }
-
-  private requireAgent(role: AgentRole): AgentAdapter {
-    const agent = this.agents.get(role);
-    if (!agent) throw new Error(`No agent registered for role: ${role}`);
-    return agent;
-  }
-
-  private modelNameFor(role: AgentRole): string {
-    if (role === "factory") return this.config.OLLAMA_MODEL;
-    if (role === "builder") return this.config.CODEX_COMMAND;
-    if (role === "designer") return this.config.GEMINI_IMAGE_MODEL;
-    return this.config.CLAUDE_CODE_COMMAND;
-  }
 }
 
-function completeSyntheticPlanningSteps(input: {
-  store: RuntimeStore;
-  taskId: string;
-  workflowPlan: WorkflowPlan;
-  assignedTo: AgentRole;
-  outputRef: string;
-}): void {
-  if (input.assignedTo === "director") return;
-  for (const step of input.workflowPlan.steps.filter((candidate) => candidate.action === "plan")) {
-    markWorkflowStep(input.store, input.taskId, step, "running");
-    markWorkflowStep(input.store, input.taskId, step, "completed", { outputRef: input.outputRef });
-  }
+interface InlineWorkflowSummary {
+  processed: number;
+  reportPath?: string;
+  reviewPath?: string;
+  verdict?: ReviewVerdict;
+  output?: string;
+  error?: string;
 }
 
-function primaryWorkerStepForRole(workflowPlan: WorkflowPlan, role: AgentRole): PlannedWorkflowStep | undefined {
-  const actionByRole: Record<AgentRole, string> = {
-    director: "plan",
-    builder: "implement",
-    factory: "generate-content",
-    designer: "generate-image",
+function summarizeInlineWorkflow(assignedTo: AgentRole, cycle: StepSchedulerCycleResult): InlineWorkflowSummary {
+  const reviewResult = [...cycle.results].reverse().find((result) => result.verdict);
+  const workerResult =
+    [...cycle.results].reverse().find((result) => result.role === assignedTo && !result.verdict) ??
+    [...cycle.results].reverse().find((result) => !result.verdict);
+  const failedResult = [...cycle.results].reverse().find((result) => result.status === "failed" || result.status === "needs_human");
+
+  return {
+    processed: cycle.processed,
+    reportPath: workerResult?.reportPath ?? reviewResult?.reportPath,
+    reviewPath: reviewResult?.reportPath,
+    verdict: reviewResult?.verdict,
+    output: workerResult?.output ?? reviewResult?.output,
+    error: failedResult?.error,
   };
-  return workflowPlan.steps.find((step) => step.action === actionByRole[role]) ?? workflowPlan.steps[0];
-}
-
-function markWorkflowStep(
-  store: RuntimeStore,
-  taskId: string,
-  step: PlannedWorkflowStep | undefined,
-  status: "running" | "completed" | "skipped" | "failed",
-  options: { outputRef?: string; error?: string } = {},
-): void {
-  if (!step) return;
-  store.updateWorkflowStepRun({
-    taskId,
-    stepId: step.id,
-    status,
-    outputRef: options.outputRef,
-    error: options.error,
-  });
-}
-
-function markPendingWorkflowSteps(
-  store: RuntimeStore,
-  taskId: string,
-  workflowPlan: WorkflowPlan,
-  status: "skipped" | "failed",
-  error: string,
-): void {
-  const pendingStepIds = new Set(
-    store.listWorkflowStepRuns(taskId)
-      .filter((step) => step.status === "pending" || step.status === "running")
-      .map((step) => step.stepId),
-  );
-
-  for (const step of workflowPlan.steps.filter((candidate) => pendingStepIds.has(candidate.id))) {
-    store.updateWorkflowStepRun({
-      taskId,
-      stepId: step.id,
-      status: step.required ? status : "skipped",
-      error,
-    });
-  }
-}
-
-function reportFolderForRole(role: AgentRole): string {
-  if (role === "builder") return "05_BuilderReports";
-  if (role === "factory") return "06_FactoryOutputs";
-  if (role === "designer") return "06_DesignerOutputs";
-  return "04_Reviews";
-}
-
-function buildRevisionPrompt(input: {
-  originalPrompt: string;
-  previousOutput: string;
-  reviewFeedback: string;
-  round: number;
-}): string {
-  return [
-    input.originalPrompt,
-    "",
-    `# Revision Request Round ${input.round + 1}`,
-    "",
-    "The Director returned NEEDS_REVISION. Revise the result using the feedback below.",
-    "",
-    "## Previous Output",
-    input.previousOutput,
-    "",
-    "## Director Feedback",
-    input.reviewFeedback,
-  ].join("\n");
-}
-
-function appendSteeringContext(
-  prompt: string,
-  messages: Array<{ content: string; createdAt: string }>,
-): string {
-  if (messages.length === 0) return prompt;
-  return [
-    prompt,
-    "",
-    "# Mid-turn Steering",
-    "",
-    "Apply these user instructions before continuing the next worker round.",
-    "",
-    ...messages.map((message) => `- ${message.createdAt}: ${message.content}`),
-  ].join("\n");
 }
