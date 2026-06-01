@@ -1,0 +1,118 @@
+*** Begin Patch
+*** Update File: src/safety/workspace-agent.ts
+@@ function run(input: AgentRunInput): Promise<AgentRunResult> {
+-      const result = await agent.run({
+-         ...input,
+-         prompt,
+-         workspacePath: workspace.path,
+-         runtimeConfig: input.runtimeConfig ?? config,
+-       });
++      // Set a workspace env variable so downstream components (like StepExecutor)
++      // can discover the correct workspace path for review and strict review.
++      const prevWorkspaceEnv = process.env.AGENTRUNNER_WORKSPACE_PATH;
++      process.env.AGENTRUNNER_WORKSPACE_PATH = workspace.path;
++      try {
++        const result = await agent.run({
++          ...input,
++          prompt,
++          workspacePath: workspace.path,
++          runtimeConfig: input.runtimeConfig ?? config,
++        });
++        return result;
++      } finally {
++        // Restore previous env var to avoid leaking state across tasks.
++        if (prevWorkspaceEnv === undefined) {
++          delete process.env.AGENTRUNNER_WORKSPACE_PATH;
++        } else {
++          process.env.AGENTRUNNER_WORKSPACE_PATH = prevWorkspaceEnv;
++        }
++      }
+@@
+-      if (!before) return result;
++      if (!before) return result;
+*** End Patch
+*** Update File: src/workflows/step-executor.ts
+@@
+   constructor(private readonly options: StepExecutorOptions) {}
++
++  /**
++   * Resolve the effective workspace path for this step. When the runtime is
++   * running under a task workspace isolation wrapper, the wrapper will set
++   * `process.env.AGENTRUNNER_WORKSPACE_PATH` to the isolated worktree. If no
++   * isolated workspace is active, fall back to the configured PROJECT_ROOT.
++   */
++  private getWorkspacePath(): string {
++    return process.env.AGENTRUNNER_WORKSPACE_PATH || this.options.config.PROJECT_ROOT;
++  }
+@@ public async runOnce(): Promise<StepExecutorResult> {
+-       result = await this.options.agent.run({
+-           taskId: step.taskId,
+-           role: this.options.role,
+-           prompt,
+-           workspacePath: this.options.config.PROJECT_ROOT,
+-         });
++       const workspacePath = this.getWorkspacePath();
++       result = await this.options.agent.run({
++           taskId: step.taskId,
++           role: this.options.role,
++           prompt,
++           workspacePath,
++         });
+@@ private async buildRuntimePrompt(step: WorkflowStepRunRow): Promise<string> {
+-     const context = await buildReviewSafetyContext({
+-       workspacePath: this.options.config.PROJECT_ROOT,
+-       config: this.options.config,
+-     });
++     const context = await buildReviewSafetyContext({
++       workspacePath: this.getWorkspacePath(),
++       config: this.options.config,
++     });
+@@ private captureReviewSafetyBefore(step: WorkflowStepRunRow): Promise<ReviewSafetySnapshot | undefined> {
+-     return captureReviewSafetySnapshot(this.options.config.PROJECT_ROOT);
++     return captureReviewSafetySnapshot(this.getWorkspacePath());
+@@ private async applyReviewSafetyResult(
+     before?: ReviewSafetySnapshot,
+   ): Promise<AgentRunResult> {
+-     const after = await captureReviewSafetySnapshot(this.options.config.PROJECT_ROOT);
++     const after = await captureReviewSafetySnapshot(this.getWorkspacePath());
+@@ private async applyStrictReviewGate(input: {
+     verdict: ReviewVerdict;
+     output: string;
+   }): Promise<{ verdict: ReviewVerdict; output: string }> {
+-     const assessment = await assessStrictReview({
+-       workspacePath: this.options.config.PROJECT_ROOT,
+-       config: this.options.config,
+-     });
++     const assessment = await assessStrictReview({
++       workspacePath: this.getWorkspacePath(),
++       config: this.options.config,
++     });
+*** End Patch
+*** Update File: .github/workflows/check.yml
+@@
+-       - name: Setup Bun
+-         run: npm i -g bun
++       - name: Setup Bun
++         uses: oven-sh/setup-bun@v2
++         with:
++           bun-version: 1.3.11
+*** End Patch
+*** Update File: scripts/approved-task-git-pr.sh
+@@
+ echo "Committed ${TASK_ID} on branch ${BRANCH}."
+ echo "Report: ${REPORT_PATH}"
+ echo "Review: ${REVIEW_PATH}"
+ echo "To push and open a PR manually:"
++
++# If AUTO_PUSH is set to "true", automatically push the branch and attempt to
++# open a draft pull request. This makes the approved task workflow fully
++# automated in CI environments. Requires 'git' remote and optionally 'gh' CLI.
++if [[ "${AUTO_PUSH:-}" == "true" ]]; then
++  git push -u origin "${BRANCH}"
++  if command -v gh >/dev/null 2>&1; then
++    gh pr create --title "feat(agent): apply ${TASK_ID}" \
++                 --body "Auto PR for approved task ${TASK_ID}\n\nReport: ${REPORT_PATH}\nReview: ${REVIEW_PATH}" \
++                 --base main --head "${BRANCH}" --draft
++  fi
++fi
+*** End Patch
