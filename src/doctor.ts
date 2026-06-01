@@ -36,6 +36,7 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<CheckResul
   results.push(checkPositiveNumber("STALE_TASK_MINUTES", config.STALE_TASK_MINUTES));
   results.push(checkPositiveNumber("WORKER_HEARTBEAT_INTERVAL_MS", config.WORKER_HEARTBEAT_INTERVAL_MS));
   results.push(checkPositiveNumber("STEP_SCHEDULER_INTERVAL_MS", config.STEP_SCHEDULER_INTERVAL_MS));
+  results.push(checkPositiveNumber("MOA_COMMAND_TIMEOUT_MS", config.MOA_COMMAND_TIMEOUT_MS));
 
   if (requireCredentials) {
     results.push(checkValue("DIRECTOR_DISCORD_TOKEN", config.DIRECTOR_DISCORD_TOKEN));
@@ -48,25 +49,51 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<CheckResul
   }
 
   if (includeExternalChecks) {
-    results.push(await checkCommandCandidates(
-      "ClaudeCode command",
-      parsePipeList(config.CLAUDE_CODE_COMMAND, config.CLAUDE_CODE_COMMANDS),
-    ));
-    results.push(await checkCommandCandidates(
-      "Codex command",
-      parsePipeList(config.CODEX_COMMAND, config.CODEX_COMMANDS),
-    ));
-    results.push(await checkEndpointCandidates(
-      "Ollama/OpenAI-compatible endpoint",
-      parsePipeList(config.OLLAMA_BASE_URL, config.OLLAMA_BASE_URLS),
-    ));
-    results.push(await checkOptionalCommand("Vision command", config.VISION_COMMAND, "VISION_COMMAND is empty; image analysis command is disabled."));
-    results.push(await checkOptionalCommand("Browser command", config.BROWSER_COMMAND, "BROWSER_COMMAND is empty; browser context command is disabled."));
-    results.push(checkOptionalValue("Gemini image provider", config.GEMINI_API_KEY, "GEMINI_API_KEY is empty; DesignerAgent will escalate image tasks to human intervention."));
+    results.push(
+      await checkCommandCandidates(
+        "ClaudeCode command",
+        parsePipeList(config.CLAUDE_CODE_COMMAND, config.CLAUDE_CODE_COMMANDS),
+      ),
+    );
+    results.push(
+      await checkCommandCandidates(
+        "Codex command",
+        parsePipeList(config.CODEX_COMMAND, config.CODEX_COMMANDS),
+      ),
+    );
+    results.push(
+      await checkEndpointCandidates(
+        "Ollama/OpenAI-compatible endpoint",
+        parsePipeList(config.OLLAMA_BASE_URL, config.OLLAMA_BASE_URLS),
+      ),
+    );
+    results.push(await checkMoaCommands(config.MOA_ENABLED, parsePipeList("", config.MOA_MODEL_COMMANDS)));
+    results.push(
+      await checkOptionalCommand(
+        "Vision command",
+        config.VISION_COMMAND,
+        "VISION_COMMAND is empty; image analysis command is disabled.",
+      ),
+    );
+    results.push(
+      await checkOptionalCommand(
+        "Browser command",
+        config.BROWSER_COMMAND,
+        "BROWSER_COMMAND is empty; browser context command is disabled.",
+      ),
+    );
+    results.push(
+      checkOptionalValue(
+        "Gemini image provider",
+        config.GEMINI_API_KEY,
+        "GEMINI_API_KEY is empty; DesignerAgent will escalate image tasks to human intervention.",
+      ),
+    );
   } else {
     results.push(skippedCheck("ClaudeCode command", "external command check skipped for local proof."));
     results.push(skippedCheck("Codex command", "external command check skipped for local proof."));
     results.push(skippedCheck("Ollama/OpenAI-compatible endpoint", "network endpoint check skipped for local proof."));
+    results.push(skippedCheck("MoA model commands", "external command check skipped for local proof."));
     results.push(skippedCheck("Vision command", "external command check skipped for local proof."));
     results.push(skippedCheck("Browser command", "external command check skipped for local proof."));
     results.push(skippedCheck("Gemini image provider", "external credential check skipped for local proof."));
@@ -91,7 +118,9 @@ export function formatDoctorMarkdown(results: CheckResult[]): string {
   return [
     "| Check | Status | Detail |",
     "|---|---|---|",
-    ...results.map((result) => `| ${escapeMarkdownTable(result.name)} | ${result.ok ? "PASS" : "FAIL"} | ${escapeMarkdownTable(result.detail)} |`),
+    ...results.map((result) =>
+      `| ${escapeMarkdownTable(result.name)} | ${result.ok ? "PASS" : "FAIL"} | ${escapeMarkdownTable(result.detail)} |`,
+    ),
   ].join("\n");
 }
 
@@ -100,7 +129,9 @@ function checkFileExists(name: string, filePath: string, required: boolean): Che
   return {
     name,
     ok: exists || !required,
-    detail: exists ? `${filePath} exists.` : `${filePath} is missing${required ? "." : "; continuing with environment defaults."}`,
+    detail: exists
+      ? `${filePath} exists.`
+      : `${filePath} is missing${required ? "." : "; continuing with environment defaults."}`,
   };
 }
 
@@ -128,7 +159,9 @@ function checkSlashCommandRegistration(enabled: boolean, clientId: string): Chec
   return {
     name: "Discord slash command registration",
     ok: Boolean(clientId),
-    detail: clientId ? "DISCORD_CLIENT_ID is configured." : "REGISTER_SLASH_COMMANDS is true, but DISCORD_CLIENT_ID is missing.",
+    detail: clientId
+      ? "DISCORD_CLIENT_ID is configured."
+      : "REGISTER_SLASH_COMMANDS is true, but DISCORD_CLIENT_ID is missing.",
   };
 }
 
@@ -198,6 +231,13 @@ async function checkCommandCandidates(name: string, commands: string[]): Promise
     ok: false,
     detail: checks.map((check, index) => `candidate ${index + 1}: ${check.detail}`).join(" | "),
   };
+}
+
+async function checkMoaCommands(enabled: boolean, commands: string[]): Promise<CheckResult> {
+  if (!enabled) {
+    return { name: "MoA model commands", ok: true, detail: "MOA_ENABLED is false; MoA is disabled." };
+  }
+  return await checkCommandCandidates("MoA model commands", commands);
 }
 
 async function checkOptionalCommand(name: string, command: string, disabledDetail: string): Promise<CheckResult> {
