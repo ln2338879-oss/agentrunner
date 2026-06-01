@@ -41,6 +41,10 @@ export interface StepExecutorResult {
 export class StepExecutor {
   constructor(private readonly options: StepExecutorOptions) {}
 
+  private getWorkspacePath(): string {
+    return process.env.AGENTRUNNER_WORKSPACE_PATH || this.options.config.PROJECT_ROOT;
+  }
+
   async runOnce(): Promise<StepExecutorResult> {
     const step = this.claimReadyStep();
     if (!step) return { claimed: false };
@@ -53,11 +57,12 @@ export class StepExecutor {
       const stopLeaseRefresh = this.startWorkflowStepLeaseRefresh(step);
       let result: AgentRunResult;
       try {
+        const workspacePath = this.getWorkspacePath();
         result = await this.options.agent.run({
           taskId: step.taskId,
           role: this.options.role,
           prompt,
-          workspacePath: this.options.config.PROJECT_ROOT,
+          workspacePath,
         });
       } finally {
         stopLeaseRefresh();
@@ -206,7 +211,7 @@ export class StepExecutor {
     if (!isReviewAction(step.action)) return prompt;
 
     const context = await buildReviewSafetyContext({
-      workspacePath: this.options.config.PROJECT_ROOT,
+      workspacePath: this.getWorkspacePath(),
       config: this.options.config,
     });
     return [prompt, context].join("\n\n");
@@ -323,7 +328,7 @@ export class StepExecutor {
 
   private async captureReviewSafetyBefore(step: WorkflowStepRunRow): Promise<ReviewSafetySnapshot | undefined> {
     if (!this.options.config.REVIEW_READ_ONLY_GUARD || !isReviewAction(step.action)) return undefined;
-    return captureReviewSafetySnapshot(this.options.config.PROJECT_ROOT);
+    return captureReviewSafetySnapshot(this.getWorkspacePath());
   }
 
   private async applyReviewSafetyResult(
@@ -332,7 +337,7 @@ export class StepExecutor {
     before?: ReviewSafetySnapshot,
   ): Promise<AgentRunResult> {
     if (!before || !isReviewAction(step.action)) return result;
-    const after = await captureReviewSafetySnapshot(this.options.config.PROJECT_ROOT);
+    const after = await captureReviewSafetySnapshot(this.getWorkspacePath());
     const safety = compareReviewSafetySnapshots(before, after);
     if (safety.ok) return result;
 
@@ -356,7 +361,7 @@ export class StepExecutor {
     output: string;
   }): Promise<{ verdict: ReviewVerdict; output: string }> {
     const assessment = await assessStrictReview({
-      workspacePath: this.options.config.PROJECT_ROOT,
+      workspacePath: this.getWorkspacePath(),
       config: this.options.config,
     });
 
