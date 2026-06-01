@@ -1,8 +1,10 @@
 import type { RuntimeConfig } from "../config";
 import { formatHumanEscalation } from "../providers/error-classifier";
+import type { RuntimeIsolationPolicy } from "../safety/runtime-isolation";
 import type { AgentAdapter, AgentRunInput, AgentRunResult } from "../runtime/types";
 import { buildCliPrompt } from "../utils/prompt";
 import { formatFailoverHeader, parseCommandCandidates, runCommandWithFailover } from "./failover";
+import { buildMoaContext } from "./moa";
 
 export class DirectorAgent implements AgentAdapter {
   readonly role = "director" as const;
@@ -12,12 +14,25 @@ export class DirectorAgent implements AgentAdapter {
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     const config = input.runtimeConfig ?? this.config;
     const workspacePath = input.workspacePath ?? config.PROJECT_ROOT;
-    const prompt = buildCliPrompt({
+    const isolationPolicy: RuntimeIsolationPolicy = {
+      role: this.role,
+      mode: "readonly",
+      projectRoot: workspacePath,
+      action: input.role === "director" ? "review-or-plan" : undefined,
+    };
+    const basePrompt = buildCliPrompt({
       role: "Director",
       taskId: input.taskId,
       prompt: input.prompt,
       workspacePath,
     });
+    const moaContext = await buildMoaContext({
+      config,
+      prompt: basePrompt,
+      workspacePath,
+      isolationPolicy,
+    });
+    const prompt = moaContext ? [basePrompt, moaContext].join("\n\n") : basePrompt;
 
     const candidate = await runCommandWithFailover({
       commands: parseCommandCandidates(config.CLAUDE_CODE_COMMAND, config.CLAUDE_CODE_COMMANDS),
@@ -26,12 +41,7 @@ export class DirectorAgent implements AgentAdapter {
       timeoutMs: config.AI_COMMAND_TIMEOUT_MS,
       enabled: config.ENABLE_AGENT_FAILOVER,
       provider: "Claude Code",
-      isolationPolicy: {
-        role: this.role,
-        mode: "readonly",
-        projectRoot: config.PROJECT_ROOT,
-        action: input.role === "director" ? "review-or-plan" : undefined,
-      },
+      isolationPolicy,
     });
 
     const output = formatDirectorOutput(candidate);
