@@ -21,12 +21,25 @@ export function withTaskWorkspaceIsolation(agent: AgentAdapter, config: RuntimeC
       const before = shouldCaptureReadOnly(input.role, action)
         ? await captureReviewSafetySnapshot(workspace.path)
         : undefined;
-      const result = await agent.run({
-        ...input,
-        prompt,
-        workspacePath: workspace.path,
-        runtimeConfig: input.runtimeConfig ?? config,
-      });
+
+      const prevWorkspaceEnv = process.env.AGENTRUNNER_WORKSPACE_PATH;
+      process.env.AGENTRUNNER_WORKSPACE_PATH = workspace.path;
+      let result: AgentRunResult;
+      try {
+        result = await agent.run({
+          ...input,
+          prompt,
+          workspacePath: workspace.path,
+          runtimeConfig: input.runtimeConfig ?? config,
+        });
+      } finally {
+        if (prevWorkspaceEnv === undefined) {
+          delete process.env.AGENTRUNNER_WORKSPACE_PATH;
+        } else {
+          process.env.AGENTRUNNER_WORKSPACE_PATH = prevWorkspaceEnv;
+        }
+      }
+
       if (!before) return result;
 
       const after = await captureReviewSafetySnapshot(workspace.path);
