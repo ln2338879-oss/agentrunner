@@ -21,6 +21,8 @@ All notable changes to AgentRunner will be documented in this file.
 - GitHub Actions approved-task PR workflow.
 - Obsidian Dataview dashboard templates.
 - Group configuration path and skill directory configuration.
+- Mixture-of-Agents review/arbitration support with `MOA_ENABLED`, `MOA_MODEL_COMMANDS`, and `MOA_COMMAND_TIMEOUT_MS`.
+- MoA documentation, `.env.example` configuration, doctor checks, and unit tests.
 
 ### Planned
 
