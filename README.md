@@ -2,13 +2,14 @@
 
 AgentRunner는 Discord에서 받은 작업을 여러 AI 역할에게 나눠 맡기는 자동 작업 런타임입니다.
 
-쉽게 말하면, 사용자가 Discord에 일을 시키면 AgentRunner가 알아서 역할을 나누고, 결과를 만들고, 리뷰하고, 필요하면 사람에게 확인을 요청합니다.
+사용자가 Discord에 일을 시키면 AgentRunner가 작업을 분류하고, 역할별 agent에게 실행을 맡기고, 결과를 리뷰하고, 필요하면 사람에게 확인을 요청합니다.
 
 ```text
 사용자 요청
-→ Director가 작업을 판단
+→ Director가 작업 판단
 → Builder / Factory / Designer가 작업 수행
 → Director가 결과 리뷰
+→ Strict Review Gate 검증
 → 승인 / 수정 요청 / 사람 확인 / 작업 분리
 → Discord와 Obsidian Vault에 기록
 ```
@@ -23,8 +24,8 @@ AgentRunner는 Discord에서 받은 작업을 여러 AI 역할에게 나눠 맡�
 |---|---|
 | Director | 작업 분류, 계획, 리뷰, 승인/차단 판단 |
 | Builder | 코드 구현, 버그 수정, 테스트, 빌드 |
-| Factory | 문서, JSON, CSV, 게임 데이터 같은 콘텐츠 생성 |
-| Designer | 이미지, 디자인, 픽셀아트, 시각 자료 생성 |
+| Factory | 문서, JSON, CSV, 게임 데이터 생성 |
+| Designer | 이미지, 디자인, 픽셀아트 생성 |
 
 ---
 
@@ -36,10 +37,10 @@ Discord
 AgentRunner
   ├─ Router              # 어떤 역할이 맡을지 판단
   ├─ Workflow Engine     # plan → work → review 흐름 관리
-  ├─ Step Scheduler      # 실행 가능한 작업을 자동 실행
+  ├─ Step Scheduler      # 실행 가능한 작업 자동 실행
   ├─ SQLite DB           # 작업 상태 저장
   ├─ Obsidian Vault      # 결과 Markdown 저장
-  ├─ Director            # 계획 / 리뷰
+  ├─ Director            # 계획 / 리뷰 / 중재
   ├─ Builder             # 코드 작업
   ├─ Factory             # 콘텐츠 생성
   └─ Designer            # 이미지 생성
@@ -119,6 +120,11 @@ ATTACHMENTS_DIR=./data/attachments
 CLAUDE_CODE_COMMAND=claude
 CODEX_COMMAND=codex
 
+# Mixture-of-Agents review support
+MOA_ENABLED=false
+MOA_MODEL_COMMANDS=
+MOA_COMMAND_TIMEOUT_MS=120000
+
 # Factory
 OLLAMA_BASE_URL=http://localhost:11434/v1
 OLLAMA_MODEL=gemma
@@ -127,6 +133,8 @@ OLLAMA_MODEL=gemma
 GEMINI_API_KEY=PASTE_GEMINI_API_KEY_HERE
 GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview
 ```
+
+전체 옵션은 `.env.example`을 기준으로 설정합니다.
 
 ---
 
@@ -190,6 +198,7 @@ Slash command:
 Director가 계획
 → Builder가 코드 수정
 → Director가 리뷰
+→ Strict Review Gate가 검증
 → 통과하면 승인
 → 문제가 있으면 Builder에게 다시 수정 요청
 ```
@@ -205,6 +214,22 @@ Director가 계획
 
 ---
 
+## Mixture-of-Agents 리뷰 보강
+
+AgentRunner는 EJClaw의 강점이었던 다중 모델 검토 아이디어를 범용 review / arbitration 단계에 맞게 확장했습니다.
+
+`MOA_ENABLED=true`로 설정하면 Director가 review 또는 arbitrate를 수행하기 전에 `MOA_MODEL_COMMANDS`에 등록된 외부 모델 명령들을 실행합니다. 이 명령들은 advisory opinion만 제공합니다. 최종 verdict는 여전히 Director와 strict review gate가 결정합니다.
+
+```env
+MOA_ENABLED=true
+MOA_MODEL_COMMANDS=codex --ask-for-approval never||ollama run qwen2.5:7b
+MOA_COMMAND_TIMEOUT_MS=120000
+```
+
+MoA 명령은 stdin으로 프롬프트를 받고 stdout으로 의견을 출력해야 합니다. 자세한 내용은 [docs/moa.md](docs/moa.md)를 참고하세요.
+
+---
+
 ## 리뷰 결과
 
 Director는 리뷰할 때 아래 결과 중 하나를 냅니다.
@@ -212,11 +237,11 @@ Director는 리뷰할 때 아래 결과 중 하나를 냅니다.
 | 결과 | 의미 |
 |---|---|
 | `APPROVED` | 작업 승인 |
-| `NEEDS_REVISION` | 수정 필요. 이전 작업 단계로 되돌림 |
+| `NEEDS_REVISION` | 수정 필요 |
 | `BLOCKED` | 더 진행할 수 없음 |
 | `NEEDS_HUMAN` | 사람이 직접 확인해야 함 |
-| `SPLIT_TASK` | 큰 작업을 작은 작업으로 나눔 |
-| `RETRY_WITH_DIFFERENT_AGENT` | 다른 방식이 필요해서 사람 확인으로 넘김 |
+| `SPLIT_TASK` | 작업 분리 필요 |
+| `RETRY_WITH_DIFFERENT_AGENT` | 다른 역할/제공자 필요 |
 
 ---
 
@@ -377,20 +402,18 @@ AgentRunner는 계속 개선 중입니다.
 
 ```text
 Dashboard 인증 없음
-task별 git worktree 격리 미구현
 승인/거절 전용 Discord 명령은 아직 보강 필요
 parallel DAG execution은 아직 미완성
 구조화 로깅 미흡
-LICENSE 파일 별도 추가 필요
 ```
 
 운영 안정성을 더 높이려면 다음 작업이 우선입니다.
 
 ```text
-1. task별 git worktree 격리
+1. Dashboard 인증
 2. 승인/거절 Discord 명령 추가
-3. Dashboard 인증
-4. 구조화 로깅
+3. 구조화 로깅
+4. MoA provider별 timeout / retry 세분화
 ```
 
 ---
