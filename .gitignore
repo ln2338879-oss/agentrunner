@@ -8,3 +8,12 @@ data/*.sqlite-*
 .agentrunner-proof/
 setup-report.md
 .DS_Store
+.obsidian/
+vault/
+ai ³í¹®/
+*.canvas
+.agents/task.md
+docs/proof/runtime-proof.md
+.agentrunner-proof/
+data/
+game-project/
