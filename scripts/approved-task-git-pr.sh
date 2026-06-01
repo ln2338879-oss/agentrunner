@@ -49,3 +49,15 @@ echo "Review: ${REVIEW_PATH}"
 echo "To push and open a PR manually:"
 echo "  git push -u origin ${BRANCH}"
 echo "  gh pr create --fill"
+
+# If AUTO_PUSH is set to "true", automatically push the branch and attempt to
+# open a draft pull request. This makes the approved task workflow fully
+# automated in CI environments. Requires 'git' remote and optionally 'gh' CLI.
+if [[ "${AUTO_PUSH:-}" == "true" ]]; then
+  git push -u origin "${BRANCH}"
+  if command -v gh >/dev/null 2>&1; then
+    gh pr create --title "feat(agent): apply ${TASK_ID}" \
+                 --body "Auto PR for approved task ${TASK_ID}\n\nReport: ${REPORT_PATH}\nReview: ${REVIEW_PATH}" \
+                 --base main --head "${BRANCH}" --draft
+  fi
+fi
