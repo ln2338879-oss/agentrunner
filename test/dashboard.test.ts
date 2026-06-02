@@ -73,6 +73,41 @@ describe("dashboard routes", () => {
     expect(payload.links.status).toBe("/api/status");
   });
 
+  test("returns office bridge commands for a future DeskRPG adapter", async () => {
+    const store = await createStore();
+
+    store.createTask({
+      id: "TASK-bridge-1",
+      title: "Move Builder NPC",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-bridge-1.md",
+    });
+
+    const response = handleDashboardRequest(new Request("http://localhost/api/office/bridge"), store);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.commands.map((command: { type: string }) => command.type)).toContain("npc:spawn-local");
+    expect(payload.commands.map((command: { type: string }) => command.type)).toContain("npc:move-local");
+    expect(payload.commands.map((command: { type: string }) => command.type)).toContain("npc:bubble");
+    expect(payload.commands.map((command: { type: string }) => command.type)).toContain("taskboard:replace");
+  });
+
+  test("allows local DeskRPG-style dashboard origins", async () => {
+    const store = await createStore();
+
+    const response = handleDashboardRequest(
+      new Request("http://localhost/api/office/snapshot", {
+        headers: { origin: "http://localhost:3000" },
+      }),
+      store,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+  });
+
   test("returns task details with artifacts and reviews", async () => {
     const store = await createStore();
 
@@ -123,5 +158,6 @@ describe("dashboard routes", () => {
     expect(html).toContain("AgentRunner Dashboard");
     expect(html).toContain("AgentRunner Office Dashboard");
     expect(html).toContain("/api/office/snapshot");
+    expect(html).toContain("/api/office/bridge");
   });
 });
