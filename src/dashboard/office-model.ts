@@ -1,5 +1,6 @@
 import type { RuntimeStore } from "../db/runtime-store";
 import type { DashboardStatus, TaskSummaryRow } from "../db/runtime-store-types";
+import { getTaskDiscordReference } from "./discord-links";
 
 export type OfficeZoneId =
   | "planning"
@@ -42,6 +43,9 @@ export interface OfficeTask {
   zoneId: OfficeZoneId;
   updatedAt: string;
   href: string;
+  discordChannelId: string | null;
+  discordMessageId: string | null;
+  discordUrl: string | null;
 }
 
 export interface OfficeLogEntry {
@@ -58,7 +62,7 @@ export interface OfficeSnapshot {
   agents: OfficeAgent[];
   tasks: OfficeTask[];
   logs: OfficeLogEntry[];
-  links: { status: string; tasks: string; health: string; bridge: string; events: string };
+  links: { status: string; tasks: string; health: string; bridge: string; events: string; assets: string; scene: string; officePreview: string; agentSheet: string };
 }
 
 export type OfficeBridgeCommand =
@@ -99,7 +103,7 @@ export function buildOfficeSnapshot(store: RuntimeStore): OfficeSnapshot {
     totals: status.totals,
     zones: Object.values(OFFICE_ZONES),
     agents: roles.map((role, index) => officeAgent(role, tasks, index)),
-    tasks: tasks.map(toOfficeTask),
+    tasks: tasks.map((task) => toOfficeTask(task, store)),
     logs: tasks.slice(0, 12).map(toOfficeLogEntry),
     links: {
       status: "/api/status",
@@ -107,6 +111,10 @@ export function buildOfficeSnapshot(store: RuntimeStore): OfficeSnapshot {
       health: "/health",
       bridge: "/api/office/bridge",
       events: "/api/office/events",
+      assets: "/api/office/assets",
+      scene: "/api/office/scene",
+      officePreview: "/office-preview.svg",
+      agentSheet: "/agent-sheet.svg",
     },
   };
 }
@@ -185,7 +193,8 @@ function officeAgent(role: string, tasks: TaskSummaryRow[], index: number): Offi
   };
 }
 
-function toOfficeTask(task: TaskSummaryRow): OfficeTask {
+function toOfficeTask(task: TaskSummaryRow, store: RuntimeStore): OfficeTask {
+  const discord = getTaskDiscordReference(store, task.id);
   return {
     id: task.id,
     title: task.title,
@@ -194,6 +203,9 @@ function toOfficeTask(task: TaskSummaryRow): OfficeTask {
     zoneId: zoneForTask(task),
     updatedAt: task.updatedAt,
     href: `/api/tasks/${encodeURIComponent(task.id)}`,
+    discordChannelId: discord?.channelId ?? null,
+    discordMessageId: discord?.messageId ?? null,
+    discordUrl: discord?.url ?? null,
   };
 }
 

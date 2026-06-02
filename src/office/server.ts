@@ -1,7 +1,9 @@
 import type { RuntimeStore } from "../db/runtime-store";
 import { buildOfficeBridgePayload, buildOfficeSnapshot } from "../dashboard/office-model";
 import { isOfficeAccessAllowed, normalizeAccessCode, officeAccessRequiredResponse } from "./access";
+import { OFFICE_ASSETS } from "./assets";
 import { renderOfficeHtml } from "./html";
+import { renderAgentSheetPreviewSvg, renderOfficePreviewSvg } from "./preview";
 import { OFFICE_SCENE } from "./scene";
 
 export interface OfficeServerOptions {
@@ -38,6 +40,10 @@ export function handleOfficeRequest(request: Request, store: RuntimeStore, optio
     return officeAccessRequiredResponse();
   }
 
+  if (url.pathname === "/api/office/assets") {
+    return json(OFFICE_ASSETS);
+  }
+
   if (url.pathname === "/api/office/scene") {
     return json(OFFICE_SCENE);
   }
@@ -52,6 +58,14 @@ export function handleOfficeRequest(request: Request, store: RuntimeStore, optio
 
   if (url.pathname === "/api/office/events") {
     return officeEventsStream(store);
+  }
+
+  if (url.pathname === "/office-preview.svg") {
+    return svg(renderOfficePreviewSvg());
+  }
+
+  if (url.pathname === "/agent-sheet.svg") {
+    return svg(renderAgentSheetPreviewSvg());
   }
 
   if (url.pathname === "/" || url.pathname === "/office") {
@@ -100,5 +114,11 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
+  });
+}
+
+function svg(data: string): Response {
+  return new Response(data, {
+    headers: { "content-type": "image/svg+xml; charset=utf-8", "cache-control": "no-cache" },
   });
 }
