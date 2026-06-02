@@ -41,6 +41,8 @@ describe("built-in office server", () => {
     expect(html).toContain("AgentRunner Office");
     expect(html).toContain("/api/office/bridge");
     expect(html).toContain("canvas");
+    expect(html).toContain("Search tasks");
+    expect(html).toContain("Selected");
   });
 
   test("exposes office bridge commands", async () => {
