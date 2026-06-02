@@ -40,9 +40,21 @@ describe("built-in office server", () => {
     expect(response.status).toBe(200);
     expect(html).toContain("AgentRunner Office");
     expect(html).toContain("/api/office/bridge");
-    expect(html).toContain("canvas");
+    expect(html).toContain("/api/office/scene");
+    expect(html).toContain("virtual pixel office");
     expect(html).toContain("Search tasks");
     expect(html).toContain("Selected");
+  });
+
+  test("exposes office scene definition", async () => {
+    const store = await createStore();
+    const response = handleOfficeRequest(new Request("http://localhost/api/office/scene"), store);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.width).toBe(960);
+    expect(payload.rooms.map((room: { id: string }) => room.id)).toContain("planning");
+    expect(payload.furniture.map((item: { id: string }) => item.id)).toContain("builder-terminal");
   });
 
   test("exposes office bridge commands", async () => {

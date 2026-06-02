@@ -2,6 +2,7 @@ import type { RuntimeStore } from "../db/runtime-store";
 import { buildOfficeBridgePayload, buildOfficeSnapshot } from "../dashboard/office-model";
 import { isOfficeAccessAllowed, normalizeAccessCode, officeAccessRequiredResponse } from "./access";
 import { renderOfficeHtml } from "./html";
+import { OFFICE_SCENE } from "./scene";
 
 export interface OfficeServerOptions {
   store: RuntimeStore;
@@ -35,6 +36,10 @@ export function handleOfficeRequest(request: Request, store: RuntimeStore, optio
 
   if (!isOfficeAccessAllowed(request, accessCode)) {
     return officeAccessRequiredResponse();
+  }
+
+  if (url.pathname === "/api/office/scene") {
+    return json(OFFICE_SCENE);
   }
 
   if (url.pathname === "/api/office/snapshot") {
