@@ -10,6 +10,7 @@ import { registerSlashCommands } from "./discord/slash-commands";
 import { RoleRegistry } from "./roles/registry";
 import { createDefaultProviderRegistry } from "./providers/registry";
 import { discordMultiBotWarnings, validateDiscordMultiBotConfig } from "./discord/multi-bot-config";
+import { startOfficeServer } from "./office/server";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -19,6 +20,15 @@ async function main(): Promise<void> {
   }
 
   const store = await RuntimeStore.open(config.DATABASE_PATH);
+
+  if (config.OFFICE_ENABLED) {
+    startOfficeServer({
+      store,
+      host: config.OFFICE_HOST,
+      port: config.OFFICE_PORT,
+    });
+  }
+
   const vault = new VaultManager(config.OBSIDIAN_VAULT_PATH);
   const orchestrator = new Orchestrator(store, vault, config);
   const groupConfig = new GroupConfigManager(config);
