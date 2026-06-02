@@ -1,28 +1,40 @@
 import type { RuntimeStore } from "../db/runtime-store";
 import { buildOfficeBridgePayload, buildOfficeSnapshot } from "../dashboard/office-model";
+import { isOfficeAccessAllowed, normalizeAccessCode, officeAccessRequiredResponse } from "./access";
 import { renderOfficeHtml } from "./html";
 
 export interface OfficeServerOptions {
   store: RuntimeStore;
   host: string;
   port: number;
+  accessCode?: string;
+}
+
+export interface OfficeRequestOptions {
+  accessCode?: string;
 }
 
 export function startOfficeServer(options: OfficeServerOptions): void {
+  const accessCode = normalizeAccessCode(options.accessCode);
   const server = Bun.serve({
     hostname: options.host,
     port: options.port,
-    fetch: (request) => handleOfficeRequest(request, options.store),
+    fetch: (request) => handleOfficeRequest(request, options.store, { accessCode }),
   });
 
-  console.log(`[office] listening on http://${server.hostname}:${server.port}`);
+  console.log(`[office] listening on http://${server.hostname}:${server.port} (${accessCode ? "access:on" : "access:off"})`);
 }
 
-export function handleOfficeRequest(request: Request, store: RuntimeStore): Response {
+export function handleOfficeRequest(request: Request, store: RuntimeStore, options: OfficeRequestOptions = {}): Response {
   const url = new URL(request.url);
+  const accessCode = normalizeAccessCode(options.accessCode);
 
   if (url.pathname === "/health") {
-    return json({ ok: true, service: "agentrunner-office" });
+    return json({ ok: true, service: "agentrunner-office", access: accessCode ? "enabled" : "disabled" });
+  }
+
+  if (!isOfficeAccessAllowed(request, accessCode)) {
+    return officeAccessRequiredResponse();
   }
 
   if (url.pathname === "/api/office/snapshot") {
