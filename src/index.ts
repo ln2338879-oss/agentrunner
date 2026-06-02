@@ -26,6 +26,7 @@ async function main(): Promise<void> {
       store,
       host: config.OFFICE_HOST,
       port: config.OFFICE_PORT,
+      accessCode: config.OFFICE_ACCESS_CODE,
     });
   }
 
