@@ -52,6 +52,27 @@ describe("dashboard routes", () => {
     expect(payload.tasks[0].id).toBe("TASK-dashboard-1");
   });
 
+  test("returns office snapshot", async () => {
+    const store = await createStore();
+
+    store.createTask({
+      id: "TASK-office-1",
+      title: "Render office dashboard",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-office-1.md",
+    });
+
+    const response = handleDashboardRequest(new Request("http://localhost/api/office/snapshot"), store);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.totals.tasks).toBe(1);
+    expect(payload.agents.map((agent: { role: string }) => agent.role)).toContain("builder");
+    expect(payload.tasks[0].id).toBe("TASK-office-1");
+    expect(payload.links.status).toBe("/api/status");
+  });
+
   test("returns task details with artifacts and reviews", async () => {
     const store = await createStore();
 
@@ -92,7 +113,7 @@ describe("dashboard routes", () => {
     expect(payload.artifacts).toHaveLength(1);
   });
 
-  test("renders dashboard HTML", async () => {
+  test("renders office dashboard HTML", async () => {
     const store = await createStore();
 
     const response = handleDashboardRequest(new Request("http://localhost/"), store);
@@ -100,5 +121,7 @@ describe("dashboard routes", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("AgentRunner Dashboard");
+    expect(html).toContain("AgentRunner Office Dashboard");
+    expect(html).toContain("/api/office/snapshot");
   });
 });
