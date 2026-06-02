@@ -29,13 +29,13 @@ export function isOfficeRequestAllowed(request: Request, secret: string): boolea
   return timingSafeTextEquals(readCookie(request, OFFICE_SESSION_COOKIE), secret);
 }
 
-export function officeSessionHeaders(secret: string): HeadersInit {
+export function officeSessionHeaders(secret: string): Record<string, string> {
   return {
     "set-cookie": `${OFFICE_SESSION_COOKIE}=${encodeURIComponent(secret)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`,
   };
 }
 
-export function clearOfficeSessionHeaders(): HeadersInit {
+export function clearOfficeSessionHeaders(): Record<string, string> {
   return {
     "set-cookie": `${OFFICE_SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
   };
