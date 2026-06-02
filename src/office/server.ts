@@ -31,7 +31,11 @@ export function startOfficeServer(options: OfficeServerOptions): void {
   console.log(`[office] listening on http://${server.hostname}:${server.port} (${accessCode ? "access:on" : "access:off"})`);
 }
 
-export function handleOfficeRequest(request: Request, store: RuntimeStore, options: OfficeRequestOptions = {}): Response {
+export async function handleOfficeRequest(
+  request: Request,
+  store: RuntimeStore,
+  options: OfficeRequestOptions = {},
+): Promise<Response> {
   const url = new URL(request.url);
   const accessCode = normalizeOfficeSecret(options.accessCode);
 
@@ -40,7 +44,7 @@ export function handleOfficeRequest(request: Request, store: RuntimeStore, optio
   }
 
   if (url.pathname === "/login") {
-    return handleLoginRequest(url, accessCode);
+    return await handleLoginRequest(request, accessCode);
   }
 
   if (url.pathname === "/logout") {
@@ -76,16 +80,17 @@ export function handleOfficeRequest(request: Request, store: RuntimeStore, optio
   return json({ error: "Not found" }, 404);
 }
 
-function handleLoginRequest(url: URL, accessCode: string): Response {
+async function handleLoginRequest(request: Request, accessCode: string): Promise<Response> {
   if (!accessCode) return redirectResponse("/office");
 
-  const submittedCode = normalizeOfficeSecret(url.searchParams.get("code") ?? "");
-  if (!submittedCode) {
+  if (request.method !== "POST") {
     return new Response(renderLoginHtml({ error: "" }), {
       headers: { "content-type": "text/html; charset=utf-8" },
     });
   }
 
+  const form = await request.formData();
+  const submittedCode = normalizeOfficeSecret(String(form.get("code") ?? ""));
   if (timingSafeTextEquals(submittedCode, accessCode)) {
     return redirectResponse("/office", officeSessionHeaders(accessCode));
   }
@@ -125,7 +130,7 @@ function officeEventsStream(store: RuntimeStore): Response {
   });
 }
 
-function redirectResponse(location: string, headers: HeadersInit = {}): Response {
+function redirectResponse(location: string, headers: Record<string, string> = {}): Response {
   return new Response(null, { status: 302, headers: { ...headers, location } });
 }
 
