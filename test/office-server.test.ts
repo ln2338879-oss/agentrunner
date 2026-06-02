@@ -2,8 +2,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { handleOfficeRequest } from "../src/office/server";
 import { RuntimeStore } from "../src/db/runtime-store";
+import { handleOfficeRequest } from "../src/office/server";
 
 const tempDirs: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -24,7 +24,7 @@ afterAll(async () => {
 describe("built-in office server", () => {
   test("returns health payload", async () => {
     const store = await createStore();
-    const response = handleOfficeRequest(new Request("http://localhost/health"), store);
+    const response = await handleOfficeRequest(new Request("http://localhost/health"), store);
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -34,13 +34,14 @@ describe("built-in office server", () => {
 
   test("renders office HTML", async () => {
     const store = await createStore();
-    const response = handleOfficeRequest(new Request("http://localhost/"), store);
+    const response = await handleOfficeRequest(new Request("http://localhost/"), store);
     const html = await response.text();
 
     expect(response.status).toBe(200);
     expect(html).toContain("AgentRunner Office");
     expect(html).toContain("/api/office/bridge");
     expect(html).toContain("canvas");
+    expect(html).toContain("Search tasks");
   });
 
   test("exposes office bridge commands", async () => {
@@ -53,7 +54,7 @@ describe("built-in office server", () => {
       obsidianPath: "01_Tasks/TASK-OFFICE-1.md",
     });
 
-    const response = handleOfficeRequest(new Request("http://localhost/api/office/bridge"), store);
+    const response = await handleOfficeRequest(new Request("http://localhost/api/office/bridge"), store);
     const payload = await response.json();
     const commandTypes = payload.commands.map((command: { type: string }) => command.type);
 
