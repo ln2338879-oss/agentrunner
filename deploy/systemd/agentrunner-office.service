@@ -1,0 +1,22 @@
+[Unit]
+Description=AgentRunner built-in Office
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/agentrunner
+EnvironmentFile=/opt/agentrunner/.env
+Environment=OFFICE_ENABLED=true
+ExecStart=/usr/local/bin/bun run office
+Restart=always
+RestartSec=5
+User=agentrunner
+Group=agentrunner
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/agentrunner/data /opt/agentrunner/vault /opt/agentrunner/game-project
+
+[Install]
+WantedBy=multi-user.target
