@@ -40,6 +40,7 @@ const ConfigSchema = z.object({
   OFFICE_ENABLED: z.coerce.boolean().default(false),
   OFFICE_HOST: z.string().default("127.0.0.1"),
   OFFICE_PORT: z.coerce.number().int().positive().default(3000),
+  OFFICE_ACCESS_CODE: z.string().optional().default(""),
   VISION_COMMAND: z.string().optional().default(""),
   VISION_COMMAND_TIMEOUT_MS: z.coerce.number().int().positive().default(300000),
   BROWSER_COMMAND: z.string().optional().default(""),
