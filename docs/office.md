@@ -52,9 +52,32 @@ GET /health            # Office health
 GET /api/office/snapshot
 GET /api/office/bridge
 GET /api/office/events
+GET /api/tasks
+GET /api/tasks/:taskId
 ```
 
-The UI uses `/api/office/bridge` and `/api/office/events` internally.
+The UI uses `/api/office/bridge` and `/api/office/events` internally for the live office view. The Selected panel uses `/api/tasks/:taskId` after a task row is clicked, so the panel shows the full task detail payload instead of only the task data embedded in the current snapshot.
+
+`GET /api/tasks` returns recent tasks and accepts an optional `limit` query parameter.
+
+`GET /api/tasks/:taskId` returns:
+
+- `task`
+- `workflowPlan`
+- `workflowSteps`
+- `runs`
+- `artifacts`
+- `reviews`
+- `timeline`
+- `discord`
+
+Unknown tasks return `404`. Malformed task detail paths return `400`.
+
+## Discord task links
+
+Task detail responses include `discord.url` when AgentRunner can build a Discord deep link for the task. Office resolves that link from the task's rows in the `messages` table: `discord_channel_id` and `discord_message_id` identify the thread or message, and `DISCORD_GUILD_ID` supplies the guild segment of the URL. If `DISCORD_GUILD_ID` is not set, the link builder falls back to the direct-message style `@me` guild segment.
+
+When a Discord link exists, the Selected panel renders it as an `Open Discord thread` link with `target="_blank"`.
 
 ## What is included now
 
@@ -68,8 +91,9 @@ The first all-in-one version includes:
 - runtime summary panel
 - agent list
 - attention queue
+- selected task detail panel powered by `/api/tasks/:taskId`
 - live task log
-- bridge and snapshot API routes
+- bridge, snapshot, task list, and task detail API routes
 
 This version does not require Next.js, Phaser, Socket.IO, or a second repository.
 
@@ -90,5 +114,4 @@ Discord remains the command and approval surface. Office stays read-only until A
 
 1. Replace the canvas placeholder sprites with selected DeskRPG pixel assets.
 2. Add a local admin login gate if the office is exposed beyond localhost.
-3. Add Discord thread/deep links to task cards once AgentRunner stores them.
-4. Add optional controls that call AgentRunner policy-checked APIs instead of mutating state directly.
+3. Add optional controls that call AgentRunner policy-checked APIs instead of mutating state directly.
