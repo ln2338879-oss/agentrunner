@@ -1,0 +1,29 @@
+{
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules/**", "dist/**"],
+  "defaults": {
+    "maxFileLines": 650,
+    "maxFunctionLines": 120,
+    "maxCyclomaticComplexity": 18,
+    "maxNestingDepth": 6
+  },
+  "overrides": {
+    "src/db/runtime-store.ts": {
+      "maxFileLines": 1150,
+      "maxFunctionLines": 180,
+      "maxCyclomaticComplexity": 28,
+      "maxNestingDepth": 7
+    },
+    "src/dashboard/server.ts": {
+      "maxFileLines": 260
+    },
+    "src/office/html.ts": {
+      "maxFunctionLines": 220,
+      "maxCyclomaticComplexity": 32,
+      "maxNestingDepth": 8
+    },
+    "test/office-server.test.ts": {
+      "maxFileLines": 330
+    }
+  }
+}
