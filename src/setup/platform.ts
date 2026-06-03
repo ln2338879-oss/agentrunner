@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import os from "node:os";
-import { runShellCommand } from "../utils/command";
+import { findExecutable } from "../utils/command";
 
 export interface PlatformInfo {
   platform: NodeJS.Platform;
@@ -17,7 +17,7 @@ export async function detectPlatform(): Promise<PlatformInfo> {
   const platform = process.platform;
   const isLinux = platform === "linux";
   const isWsl = isLinux && (existsSync("/proc/sys/fs/binfmt_misc/WSLInterop") || os.release().toLowerCase().includes("microsoft"));
-  const hasSystemd = isLinux && (await commandOk("command -v systemctl"));
+  const hasSystemd = isLinux && Boolean(findExecutable("systemctl"));
 
   return {
     platform,
@@ -29,9 +29,4 @@ export async function detectPlatform(): Promise<PlatformInfo> {
     isWsl,
     hasSystemd,
   };
-}
-
-async function commandOk(command: string): Promise<boolean> {
-  const result = await runShellCommand({ command, timeoutMs: 5000 });
-  return result.ok;
 }

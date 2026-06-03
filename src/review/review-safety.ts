@@ -1,5 +1,5 @@
 import type { RuntimeConfig } from "../config";
-import { runShellCommand } from "../utils/command";
+import { runCommandSequence, runShellCommand } from "../utils/command";
 
 export interface ReviewSafetySnapshot {
   supported: boolean;
@@ -78,7 +78,7 @@ export async function buildReviewSafetyContext(input: {
   const sections = [
     "## Review Safety Contract",
     "- You are in read-only review mode.",
-    "- Do not create, edit, delete, move, format, or commit files.",
+    "- Remain in inspection-only mode and return requested changes through the verdict.",
     "- Inspect dependency outputs, validation results, and diffs only.",
     "- If changes are needed, return VERDICT: NEEDS_REVISION with concrete fixes for Builder.",
     "- If the task cannot be reviewed safely, return VERDICT: BLOCKED or NEEDS_HUMAN.",
@@ -86,7 +86,7 @@ export async function buildReviewSafetyContext(input: {
 
   if (!input.config.REVIEW_DIFF_COMMAND) return sections.join("\n");
 
-  const result = await runShellCommand({
+  const result = await runCommandSequence({
     command: input.config.REVIEW_DIFF_COMMAND,
     cwd: input.workspacePath,
     timeoutMs: input.config.REVIEW_CONTEXT_COMMAND_TIMEOUT_MS,
