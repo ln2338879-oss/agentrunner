@@ -1,5 +1,5 @@
 import { assessRuntimeIsolation, formatRuntimeIsolationViolation, type RuntimeIsolationPolicy } from "../safety/runtime-isolation";
-import { parseCommandLine, runCommand, type RunShellCommandOptions, type ShellCommandResult } from "./command";
+import { parseCommandLine, runCommand, splitCommandSequence, type RunShellCommandOptions, type ShellCommandResult } from "./command";
 
 export interface RunIsolatedCommandOptions extends RunShellCommandOptions {
   isolationPolicy?: RuntimeIsolationPolicy;
@@ -7,15 +7,7 @@ export interface RunIsolatedCommandOptions extends RunShellCommandOptions {
 
 export async function runIsolatedCommand(options: RunIsolatedCommandOptions): Promise<ShellCommandResult> {
   const parsed = parseCommandLine(options.command);
-  if (!parsed.ok) {
-    return {
-      ok: false,
-      exitCode: null,
-      stdout: "# Runtime Isolation Blocked Command\n\nCommand could not be parsed as a simple argv invocation.",
-      stderr: parsed.error,
-      timedOut: false,
-    };
-  }
+  if (!parsed.ok) return blocked(parsed.error);
 
   const decision = assessRuntimeIsolation({
     command: options.command,
@@ -24,15 +16,7 @@ export async function runIsolatedCommand(options: RunIsolatedCommandOptions): Pr
     policy: options.isolationPolicy,
   });
 
-  if (!decision.ok) {
-    return {
-      ok: false,
-      exitCode: null,
-      stdout: formatRuntimeIsolationViolation(decision),
-      stderr: decision.reason ?? "Command blocked by runtime isolation policy.",
-      timedOut: false,
-    };
-  }
+  if (!decision.ok) return isolationBlocked(decision);
 
   return runCommand({
     argv: parsed.parsed.argv,
@@ -41,4 +25,59 @@ export async function runIsolatedCommand(options: RunIsolatedCommandOptions): Pr
     timeoutMs: options.timeoutMs,
     env: options.env,
   });
+}
+
+export async function runIsolatedCommandSequence(options: RunIsolatedCommandOptions): Promise<ShellCommandResult> {
+  const commands = splitCommandSequence(options.command);
+  if (!commands.ok) return blocked(commands.error);
+
+  const stdoutParts: string[] = [];
+  const stderrParts: string[] = [];
+  let lastExitCode: number | null = 0;
+  let timedOut = false;
+
+  for (const command of commands.commands) {
+    const result = await runIsolatedCommand({ ...options, command });
+    stdoutParts.push(result.stdout);
+    stderrParts.push(result.stderr);
+    lastExitCode = result.exitCode;
+    timedOut = timedOut || result.timedOut;
+    if (!result.ok) {
+      return {
+        ok: false,
+        exitCode: result.exitCode,
+        stdout: stdoutParts.join(""),
+        stderr: stderrParts.join(""),
+        timedOut,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    exitCode: lastExitCode,
+    stdout: stdoutParts.join(""),
+    stderr: stderrParts.join(""),
+    timedOut,
+  };
+}
+
+function isolationBlocked(decision: ReturnType<typeof assessRuntimeIsolation>): ShellCommandResult {
+  return {
+    ok: false,
+    exitCode: null,
+    stdout: formatRuntimeIsolationViolation(decision),
+    stderr: decision.reason ?? "Command blocked by runtime isolation policy.",
+    timedOut: false,
+  };
+}
+
+function blocked(message: string): ShellCommandResult {
+  return {
+    ok: false,
+    exitCode: null,
+    stdout: "# Runtime Isolation Blocked Command\n\nCommand could not be parsed as a simple argv invocation.",
+    stderr: message,
+    timedOut: false,
+  };
 }
