@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 export interface QualityBudget {
@@ -63,28 +63,25 @@ async function readBudget(filePath: string): Promise<QualityBudget> {
 
 async function listTypeScriptFiles(roots: string[], budget: QualityBudget): Promise<string[]> {
   const files: string[] = [];
-  for (const root of roots) {
-    await collectTypeScriptFiles(root, files, budget);
-  }
+  for (const root of roots) await collectTypeScriptFiles(root, files, budget);
   return files.filter((filePath) => isIncluded(filePath, budget)).sort();
 }
 
 async function collectTypeScriptFiles(directory: string, files: string[], budget: QualityBudget): Promise<void> {
-  let entries: any[];
+  let names: string[];
   try {
-    entries = await readdir(directory, { withFileTypes: true }) as any[];
+    names = await readdir(directory);
   } catch {
     return;
   }
 
-  for (const entry of entries) {
-    const entryPath = toRepoPath(path.join(directory, String(entry.name)));
+  for (const name of names) {
+    const entryPath = toRepoPath(path.join(directory, name));
     if (shouldSkipPath(entryPath, budget)) continue;
-    if (entry.isDirectory()) {
-      await collectTypeScriptFiles(entryPath, files, budget);
-    } else if (entry.isFile() && String(entry.name).endsWith(".ts")) {
-      files.push(entryPath);
-    }
+    const info = await stat(entryPath).catch(() => null);
+    if (!info) continue;
+    if (info.isDirectory()) await collectTypeScriptFiles(entryPath, files, budget);
+    else if (info.isFile() && entryPath.endsWith(".ts")) files.push(entryPath);
   }
 }
 
@@ -106,20 +103,15 @@ function checkFile(filePath: string, budget: QualityBudget): Violation[] {
     ["maxNestingDepth", metrics.maxNestingDepth, limits.maxNestingDepth],
   ];
 
-  return checks
-    .filter(([, actual, limit]) => actual > limit)
-    .map(([metric, actual, limit]) => ({ filePath, metric, actual, limit }));
+  return checks.filter(([, actual, limit]) => actual > limit).map(([metric, actual, limit]) => ({ filePath, metric, actual, limit }));
 }
 
 function limitsForFile(filePath: string, budget: QualityBudget): BudgetLimits {
-  return {
-    ...budget.defaults,
-    ...(budget.overrides?.[filePath] ?? {}),
-  };
+  return { ...budget.defaults, ...(budget.overrides?.[filePath] ?? {}) };
 }
 
 export function calculateMetrics(source: string): FileMetrics {
-  const lines = source.split(/\r?\n/);
+  const lines = source.split("\n");
   let depth = 0;
   let maxDepth = 0;
   let maxFunctionLines = 0;
@@ -129,20 +121,12 @@ export function calculateMetrics(source: string): FileMetrics {
   for (let index = 0; index < lines.length; index += 1) {
     const line = stripLineComment(lines[index] ?? "");
     const lineNumber = index + 1;
-
-    if (!currentFunction && looksLikeFunctionStart(line)) {
-      currentFunction = { startLine: lineNumber, startDepth: depth, complexity: 1 };
-    }
-
-    if (currentFunction) {
-      currentFunction.complexity += complexityContribution(line);
-    }
-
+    if (!currentFunction && looksLikeFunctionStart(line)) currentFunction = { startLine: lineNumber, startDepth: depth, complexity: 1 };
+    if (currentFunction) currentFunction.complexity += complexityContribution(line);
     depth += countChar(line, "{");
     maxDepth = Math.max(maxDepth, depth);
     depth -= countChar(line, "}");
     depth = Math.max(0, depth);
-
     if (currentFunction && depth <= currentFunction.startDepth && line.includes("}")) {
       const functionLines = lineNumber - currentFunction.startLine + 1;
       maxFunctionLines = Math.max(maxFunctionLines, functionLines);
@@ -162,16 +146,11 @@ export function calculateMetrics(source: string): FileMetrics {
 function looksLikeFunctionStart(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith("//")) return false;
-  if (/^(if|for|while|switch|catch|else|try)\b/.test(trimmed)) return false;
-  return /\bfunction\b/.test(trimmed)
-    || /=>\s*\{/.test(trimmed)
-    || /^(async\s+)?[A-Za-z_$][\w$]*\s*\([^)]*\)\s*[:\w\s<>,\[\]|.&?]*\{/.test(trimmed);
+  return trimmed.includes("function ") || trimmed.includes("=> {") || trimmed.endsWith(") {");
 }
 
 function complexityContribution(line: string): number {
-  return countMatches(line, /\b(if|for|while|case|catch)\b/g)
-    + countMatches(line, /\?\s*[^.:]/g)
-    + countMatches(line, /&&|\|\|/g);
+  return countWords(line, ["if", "for", "while", "case", "catch"]) + countText(line, "&&") + countText(line, "||") + countText(line, "?");
 }
 
 function stripLineComment(line: string): string {
@@ -180,11 +159,16 @@ function stripLineComment(line: string): string {
 }
 
 function countChar(value: string, char: string): number {
-  return [...value].filter((candidate) => candidate === char).length;
+  return Array.from(value).filter((candidate) => candidate === char).length;
 }
 
-function countMatches(value: string, pattern: RegExp): number {
-  return value.match(pattern)?.length ?? 0;
+function countWords(value: string, words: string[]): number {
+  const tokens = value.split(/[^A-Za-z_]+/).filter(Boolean);
+  return tokens.filter((token) => words.includes(token)).length;
+}
+
+function countText(value: string, text: string): number {
+  return value.split(text).length - 1;
 }
 
 function countNonTrailingEmptyLines(lines: string[]): number {
@@ -194,25 +178,18 @@ function countNonTrailingEmptyLines(lines: string[]): number {
 }
 
 function matchesAny(filePath: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => globLikeMatch(filePath, pattern));
+  return patterns.some((pattern) => simpleMatch(filePath, pattern));
 }
 
-function globLikeMatch(filePath: string, pattern: string): boolean {
-  const regex = new RegExp(`^${escapeRegex(pattern).replaceAll("\\*\\*", ".*").replaceAll("\\*", "[^/]*")}$`);
-  return regex.test(filePath);
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+function simpleMatch(filePath: string, pattern: string): boolean {
+  if (pattern === "src/**/*.ts") return filePath.startsWith("src/") && filePath.endsWith(".ts");
+  if (pattern === "test/**/*.ts") return filePath.startsWith("test/") && filePath.endsWith(".ts");
+  if (pattern.endsWith("/**")) return filePath.startsWith(pattern.slice(0, -3));
+  return filePath === pattern;
 }
 
 export function formatViolations(violations: Violation[]): string {
-  return [
-    "Code quality budget violations:",
-    ...violations.map(
-      (violation) => `- ${violation.filePath}: ${violation.metric}=${violation.actual} exceeds ${violation.limit}`,
-    ),
-  ].join("\n");
+  return ["Code quality budget violations:", ...violations.map((violation) => `- ${violation.filePath}: ${violation.metric}=${violation.actual} exceeds ${violation.limit}`)].join("\n");
 }
 
 function toRepoPath(filePath: string): string {
