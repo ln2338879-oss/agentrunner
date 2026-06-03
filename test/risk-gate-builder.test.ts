@@ -63,7 +63,7 @@ describe("human approval risk gate", () => {
         CODEX_COMMAND: "node --version",
         CODEX_COMMANDS: "",
         BUILDER_DIFF_COMMAND: "",
-        BUILDER_TEST_COMMAND: "sed -i 's/a/b/' src/app.ts",
+        BUILDER_TEST_COMMAND: "node --version",
         BUILDER_BUILD_COMMAND: "",
         RISK_APPROVAL_ENABLED: "false",
       });
@@ -77,7 +77,7 @@ describe("human approval risk gate", () => {
 
       expect(result.ok).toBe(false);
       expect(result.output).toContain("Runtime Isolation Blocked Command");
-      expect(result.output).toContain("in-place file mutation command");
+      expect(result.output).toContain("allow-list");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
