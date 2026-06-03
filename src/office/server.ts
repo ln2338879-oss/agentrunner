@@ -5,6 +5,7 @@ import { OFFICE_ASSETS } from "./assets";
 import { renderOfficeHtml } from "./html";
 import { renderAgentSheetPreviewSvg, renderOfficePreviewSvg } from "./preview";
 import { OFFICE_SCENE } from "./scene";
+import { buildOfficeTaskDetail, buildOfficeTaskList } from "./task-detail";
 
 export interface OfficeServerOptions {
   store: RuntimeStore;
@@ -58,6 +59,19 @@ export function handleOfficeRequest(request: Request, store: RuntimeStore, optio
 
   if (url.pathname === "/api/office/events") {
     return officeEventsStream(store);
+  }
+
+  if (url.pathname === "/api/tasks") {
+    const limit = Number(url.searchParams.get("limit") ?? "30");
+    return json(buildOfficeTaskList(store, Number.isFinite(limit) ? limit : 30));
+  }
+
+  if (url.pathname.startsWith("/api/tasks/")) {
+    const taskId = decodeURIComponent(url.pathname.replace("/api/tasks/", ""));
+    if (!taskId || taskId.includes("/")) return json({ error: "Invalid task id" }, 400);
+    const detail = buildOfficeTaskDetail(store, taskId);
+    if (!detail) return json({ error: `Task not found: ${taskId}` }, 404);
+    return json(detail);
   }
 
   if (url.pathname === "/office-preview.svg") {

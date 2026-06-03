@@ -123,4 +123,47 @@ describe("built-in office server", () => {
     if (previousGuildId === undefined) delete process.env.DISCORD_GUILD_ID;
     else process.env.DISCORD_GUILD_ID = previousGuildId;
   });
+
+  test("serves task detail from office task routes", async () => {
+    const previousGuildId = process.env.DISCORD_GUILD_ID;
+    process.env.DISCORD_GUILD_ID = "guild-456";
+    const store = await createStore();
+    store.createTask({
+      id: "TASK-DETAIL-1",
+      title: "Render task detail panel",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-DETAIL-1.md",
+    });
+    store.recordArtifact({
+      id: "ART-DETAIL-1",
+      taskId: "TASK-DETAIL-1",
+      type: "report",
+      path: "02_Reports/TASK-DETAIL-1.md",
+      createdBy: "builder",
+    });
+    store.recordMessage({
+      id: "MSG-DETAIL-1",
+      discordMessageId: "message-456",
+      discordChannelId: "channel-456",
+      taskId: "TASK-DETAIL-1",
+      senderRole: "director",
+      content: "Show me detail",
+    });
+
+    const listResponse = handleOfficeRequest(new Request("http://localhost/api/tasks?limit=5"), store);
+    const detailResponse = handleOfficeRequest(new Request("http://localhost/api/tasks/TASK-DETAIL-1"), store);
+    const listPayload = await listResponse.json();
+    const detailPayload = await detailResponse.json();
+
+    expect(listResponse.status).toBe(200);
+    expect(listPayload.tasks.map((task: { id: string }) => task.id)).toContain("TASK-DETAIL-1");
+    expect(detailResponse.status).toBe(200);
+    expect(detailPayload.task.id).toBe("TASK-DETAIL-1");
+    expect(detailPayload.artifacts[0].path).toBe("02_Reports/TASK-DETAIL-1.md");
+    expect(detailPayload.discord.url).toBe("https://discord.com/channels/guild-456/channel-456/message-456");
+
+    if (previousGuildId === undefined) delete process.env.DISCORD_GUILD_ID;
+    else process.env.DISCORD_GUILD_ID = previousGuildId;
+  });
 });
