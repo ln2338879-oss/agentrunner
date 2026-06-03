@@ -70,19 +70,19 @@ async function listTypeScriptFiles(roots: string[], budget: QualityBudget): Prom
 }
 
 async function collectTypeScriptFiles(directory: string, files: string[], budget: QualityBudget): Promise<void> {
-  let entries: Awaited<ReturnType<typeof readdir>>;
+  let entries: any[];
   try {
-    entries = await readdir(directory, { withFileTypes: true });
+    entries = await readdir(directory, { withFileTypes: true }) as any[];
   } catch {
     return;
   }
 
   for (const entry of entries) {
-    const entryPath = toRepoPath(path.join(directory, entry.name));
+    const entryPath = toRepoPath(path.join(directory, String(entry.name)));
     if (shouldSkipPath(entryPath, budget)) continue;
     if (entry.isDirectory()) {
       await collectTypeScriptFiles(entryPath, files, budget);
-    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+    } else if (entry.isFile() && String(entry.name).endsWith(".ts")) {
       files.push(entryPath);
     }
   }
