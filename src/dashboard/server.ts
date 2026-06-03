@@ -98,6 +98,7 @@ function officeEventsStream(store: RuntimeStore, headers: Record<string, string>
 
 function renderDashboardHtml(store: RuntimeStore): string {
   const snapshot = buildOfficeSnapshot(store);
+  const status = store.getDashboardStatus();
   const zoneCards = snapshot.zones
     .map((zone) => `<section class="zone"><strong>${escapeHtml(zone.label)}</strong><span>${escapeHtml(zone.id)}</span></section>`)
     .join("\n");
@@ -118,6 +119,15 @@ function renderDashboardHtml(store: RuntimeStore): string {
   const logRows = snapshot.logs
     .map((log) => `<li><strong>${escapeHtml(log.status)}</strong> ${escapeHtml(log.label)} <span>${escapeHtml(log.createdAt)}</span></li>`)
     .join("\n");
+  const workflowStepRows = status.workflowStepsByStatus
+    .map((row) => `<li><strong>${escapeHtml(row.status)}</strong> <span>${row.count}</span></li>`)
+    .join("\n");
+  const activeLockRows = status.activeLocks
+    .map(
+      (lock) =>
+        `<li><strong>${escapeHtml(lock.id)}</strong> ${escapeHtml(lock.lockedBy ?? "unknown")} <span>${escapeHtml(lock.lockExpiresAt ?? "no expiry")}</span></li>`,
+    )
+    .join("\n");
 
   return `<!doctype html>
 <html lang="en">
@@ -134,7 +144,7 @@ function renderDashboardHtml(store: RuntimeStore): string {
 <main class="shell">
 <header class="top"><div><h1>AgentRunner Office Dashboard</h1><p class="muted">Discord는 대화/명령/회의/승인, 이 화면은 AgentRunner 작업 상태를 시각화하는 오피스입니다.</p></div><nav class="links"><a class="pill" href="/api/office/snapshot">/api/office/snapshot</a><a class="pill" href="/api/office/bridge">/api/office/bridge</a><a class="pill" href="/api/office/events">/api/office/events</a><a class="pill" href="/api/status">/api/status</a></nav></header>
 <section class="card"><h2 style="padding:16px;margin:0">2D Agent Office Zones</h2><div class="stats"><div class="stat"><span>Total</span><strong>${snapshot.totals.tasks}</strong></div><div class="stat"><span>Open</span><strong>${snapshot.totals.openTasks}</strong></div><div class="stat"><span>Blocked</span><strong>${snapshot.totals.blockedTasks}</strong></div><div class="stat"><span>Approved</span><strong>${snapshot.totals.approvedTasks}</strong></div></div><div class="office">${zoneCards}</div></section>
-<aside class="card side"><h2>Agents</h2>${agentCards || "<p>No agents yet.</p>"}<h2>Live Log</h2><ul>${logRows || "<li>No task events yet.</li>"}</ul></aside>
+<aside class="card side"><h2>Agents</h2>${agentCards || "<p>No agents yet.</p>"}<h2>Workflow Steps</h2><ul>${workflowStepRows || "<li>No workflow steps yet.</li>"}</ul><h2>Active Locks</h2><ul>${activeLockRows || "<li>No active locks.</li>"}</ul><h2>Live Log</h2><ul>${logRows || "<li>No task events yet.</li>"}</ul></aside>
 <section class="card" style="grid-column:1/-1;padding:16px"><h2>Recent Tasks</h2><table><thead><tr><th>Task</th><th>Status</th><th>Role</th><th>Title</th><th>Updated</th></tr></thead><tbody>${taskRows || "<tr><td colspan=\"5\">No tasks yet.</td></tr>"}</tbody></table></section>
 </main>
 </body>
