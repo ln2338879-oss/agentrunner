@@ -67,8 +67,8 @@ export function handleOfficeRequest(request: Request, store: RuntimeStore, optio
   }
 
   if (url.pathname.startsWith("/api/tasks/")) {
-    const taskId = decodeURIComponent(url.pathname.replace("/api/tasks/", ""));
-    if (!taskId || taskId.includes("/")) return json({ error: "Invalid task id" }, 400);
+    const taskId = parseOfficeTaskIdPath(url.pathname);
+    if (!taskId) return json({ error: "Invalid task id" }, 400);
     const detail = buildOfficeTaskDetail(store, taskId);
     if (!detail) return json({ error: `Task not found: ${taskId}` }, 404);
     return json(detail);
@@ -89,6 +89,20 @@ export function handleOfficeRequest(request: Request, store: RuntimeStore, optio
   }
 
   return json({ error: "Not found" }, 404);
+}
+
+function parseOfficeTaskIdPath(pathname: string): string | null {
+  const prefix = "/api/tasks/";
+  const encodedTaskId = pathname.slice(prefix.length);
+  if (!encodedTaskId || encodedTaskId.includes("/")) return null;
+
+  try {
+    const taskId = decodeURIComponent(encodedTaskId);
+    if (!taskId || taskId.includes("/") || taskId.includes("\0")) return null;
+    return taskId;
+  } catch {
+    return null;
+  }
 }
 
 function officeEventsStream(store: RuntimeStore): Response {
