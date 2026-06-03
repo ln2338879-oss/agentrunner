@@ -7,7 +7,11 @@ export interface RunIsolatedCommandOptions extends RunShellCommandOptions {
 
 export async function runIsolatedCommand(options: RunIsolatedCommandOptions): Promise<ShellCommandResult> {
   const parsed = parseCommandLine(options.command);
-  if (!parsed.ok) return blocked(parsed.error);
+  if (!parsed.ok) {
+    const sequence = splitCommandSequence(options.command);
+    if (sequence.ok && sequence.commands.length > 1) return runIsolatedCommandSequence(options);
+    return blocked(parsed.error);
+  }
 
   const decision = assessRuntimeIsolation({
     command: options.command,
