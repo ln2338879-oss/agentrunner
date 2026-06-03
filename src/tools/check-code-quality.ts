@@ -2,25 +2,32 @@ import { readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
-interface QualityBudget {
+export interface QualityBudget {
   include: string[];
   exclude: string[];
   defaults: BudgetLimits;
   overrides?: Record<string, Partial<BudgetLimits>>;
 }
 
-interface BudgetLimits {
+export interface BudgetLimits {
   maxFileLines: number;
   maxFunctionLines: number;
   maxCyclomaticComplexity: number;
   maxNestingDepth: number;
 }
 
-interface FileMetrics {
+export interface FileMetrics {
   fileLines: number;
   maxFunctionLines: number;
   maxCyclomaticComplexity: number;
   maxNestingDepth: number;
+}
+
+export interface Violation {
+  filePath: string;
+  metric: keyof BudgetLimits;
+  actual: number;
+  limit: number;
 }
 
 interface FunctionState {
@@ -29,28 +36,24 @@ interface FunctionState {
   complexity: number;
 }
 
-interface Violation {
-  filePath: string;
-  metric: keyof BudgetLimits;
-  actual: number;
-  limit: number;
-}
-
 const CONFIG_PATH = "code-quality-budgets.json";
 const DEFAULT_SCAN_ROOTS = ["src", "test"];
 
-async function main(): Promise<void> {
-  const budget = await readBudget(CONFIG_PATH);
+export async function checkCodeQualityBudgets(configPath = CONFIG_PATH): Promise<Violation[]> {
+  const budget = await readBudget(configPath);
   const files = await listTypeScriptFiles(DEFAULT_SCAN_ROOTS, budget);
-  const violations = files.flatMap((filePath) => checkFile(filePath, budget));
+  return files.flatMap((filePath) => checkFile(filePath, budget));
+}
 
+export async function runCodeQualityBudgetCli(): Promise<void> {
+  const violations = await checkCodeQualityBudgets(CONFIG_PATH);
   if (violations.length > 0) {
     console.error(formatViolations(violations));
     process.exitCode = 1;
     return;
   }
 
-  console.log(`Code quality budgets passed for ${files.length} TypeScript files.`);
+  console.log("Code quality budgets passed.");
 }
 
 async function readBudget(filePath: string): Promise<QualityBudget> {
@@ -115,7 +118,7 @@ function limitsForFile(filePath: string, budget: QualityBudget): BudgetLimits {
   };
 }
 
-function calculateMetrics(source: string): FileMetrics {
+export function calculateMetrics(source: string): FileMetrics {
   const lines = source.split(/\r?\n/);
   let depth = 0;
   let maxDepth = 0;
@@ -203,7 +206,7 @@ function escapeRegex(value: string): string {
   return value.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function formatViolations(violations: Violation[]): string {
+export function formatViolations(violations: Violation[]): string {
   return [
     "Code quality budget violations:",
     ...violations.map(
@@ -216,7 +219,9 @@ function toRepoPath(filePath: string): string {
   return filePath.split(path.sep).join("/");
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (import.meta.main) {
+  runCodeQualityBudgetCli().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
