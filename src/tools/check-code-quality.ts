@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -40,7 +41,7 @@ const DEFAULT_SCAN_ROOTS = ["src", "test"];
 
 async function main(): Promise<void> {
   const budget = await readBudget(CONFIG_PATH);
-  const files = await listTypeScriptFiles(DEFAULT_SCAN_ROOTS);
+  const files = await listTypeScriptFiles(DEFAULT_SCAN_ROOTS, budget);
   const violations = files.flatMap((filePath) => checkFile(filePath, budget));
 
   if (violations.length > 0) {
@@ -57,15 +58,15 @@ async function readBudget(filePath: string): Promise<QualityBudget> {
   return JSON.parse(raw) as QualityBudget;
 }
 
-async function listTypeScriptFiles(roots: string[]): Promise<string[]> {
+async function listTypeScriptFiles(roots: string[], budget: QualityBudget): Promise<string[]> {
   const files: string[] = [];
   for (const root of roots) {
-    await collectTypeScriptFiles(root, files);
+    await collectTypeScriptFiles(root, files, budget);
   }
-  return files.sort();
+  return files.filter((filePath) => isIncluded(filePath, budget)).sort();
 }
 
-async function collectTypeScriptFiles(directory: string, files: string[]): Promise<void> {
+async function collectTypeScriptFiles(directory: string, files: string[], budget: QualityBudget): Promise<void> {
   let entries: Awaited<ReturnType<typeof readdir>>;
   try {
     entries = await readdir(directory, { withFileTypes: true });
@@ -74,23 +75,27 @@ async function collectTypeScriptFiles(directory: string, files: string[]): Promi
   }
 
   for (const entry of entries) {
-    const entryPath = path.join(directory, entry.name);
-    if (shouldSkipPath(entryPath)) continue;
+    const entryPath = toRepoPath(path.join(directory, entry.name));
+    if (shouldSkipPath(entryPath, budget)) continue;
     if (entry.isDirectory()) {
-      await collectTypeScriptFiles(entryPath, files);
+      await collectTypeScriptFiles(entryPath, files, budget);
     } else if (entry.isFile() && entry.name.endsWith(".ts")) {
-      files.push(toRepoPath(entryPath));
+      files.push(entryPath);
     }
   }
 }
 
-function shouldSkipPath(filePath: string): boolean {
-  return filePath.includes("node_modules") || filePath.includes("dist") || filePath.includes(".git");
+function shouldSkipPath(filePath: string, budget: QualityBudget): boolean {
+  return filePath.includes("node_modules") || filePath.includes("dist") || filePath.includes(".git") || matchesAny(filePath, budget.exclude);
+}
+
+function isIncluded(filePath: string, budget: QualityBudget): boolean {
+  return budget.include.length === 0 || matchesAny(filePath, budget.include);
 }
 
 function checkFile(filePath: string, budget: QualityBudget): Violation[] {
   const limits = limitsForFile(filePath, budget);
-  const metrics = calculateMetrics(Bun.file(filePath).textSync());
+  const metrics = calculateMetrics(readFileSync(filePath, "utf-8"));
   const checks: Array<[keyof BudgetLimits, number, number]> = [
     ["maxFileLines", metrics.fileLines, limits.maxFileLines],
     ["maxFunctionLines", metrics.maxFunctionLines, limits.maxFunctionLines],
@@ -183,6 +188,19 @@ function countNonTrailingEmptyLines(lines: string[]): number {
   let end = lines.length;
   while (end > 0 && !lines[end - 1]?.trim()) end -= 1;
   return end;
+}
+
+function matchesAny(filePath: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => globLikeMatch(filePath, pattern));
+}
+
+function globLikeMatch(filePath: string, pattern: string): boolean {
+  const regex = new RegExp(`^${escapeRegex(pattern).replaceAll("\\*\\*", ".*").replaceAll("\\*", "[^/]*")}$`);
+  return regex.test(filePath);
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function formatViolations(violations: Violation[]): string {
