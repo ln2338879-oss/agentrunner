@@ -87,7 +87,11 @@ export async function runCommand(options: RunCommandOptions): Promise<ShellComma
 
 export async function runShellCommand(options: RunShellCommandOptions): Promise<ShellCommandResult> {
   const parsed = parseCommandLine(options.command);
-  if (!parsed.ok) return failedBeforeSpawn(parsed.error);
+  if (!parsed.ok) {
+    const sequence = splitCommandSequence(options.command);
+    if (sequence.ok && sequence.commands.length > 1) return runCommandSequence(options);
+    return failedBeforeSpawn(parsed.error);
+  }
   return runCommand({
     argv: parsed.parsed.argv,
     cwd: options.cwd,
