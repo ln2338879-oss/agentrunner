@@ -28,9 +28,10 @@
     "lint": "eslint src test --ext .ts",
     "lint:fix": "eslint src test --ext .ts --fix",
     "format": "prettier --write \"**/*.{ts,json,md,yml,yaml}\"",
-    "format:check": "prettier --check package.json tsconfig.json .prettierrc \".github/workflows/*.{yml,yaml}\"",
+    "format:check": "prettier --check package.json tsconfig.json code-quality-budgets.json .prettierrc \".github/workflows/*.{yml,yaml}\"",
+    "quality:budget": "bun src/tools/check-code-quality.ts",
     "test": "bun test ./test/**/*.test.ts ./src/**/*.test.ts",
-    "quality:check": "bun run typecheck && bun run lint && bun run format:check && bun run test",
+    "quality:check": "bun run typecheck && bun run lint && bun run format:check && bun run quality:budget && bun run test",
     "check": "bun run quality:check",
     "build:all": "bun run quality:check && bun run build"
   },
