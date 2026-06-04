@@ -93,7 +93,7 @@ export function isProtectedGitWrite(input: {
   return { blocked, subcommand: parsed.subcommand, target, projectRoot };
 }
 
-function main(): void {
+export function runGitGuardShim(): void {
   const realGit = process.env.AGENTRUNNER_REAL_GIT;
   const projectRoot = process.env.AGENTRUNNER_GIT_GUARD_PROJECT_ROOT;
   if (!realGit || !projectRoot) {
@@ -135,4 +135,4 @@ function isSameOrInside(candidate: string, parent: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-if (import.meta.main) main();
+if (import.meta.main) runGitGuardShim();
