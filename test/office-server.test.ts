@@ -75,6 +75,18 @@ function seedTaskDetail(store: RuntimeStore): void {
     round: 1,
     feedback: "Looks ready.",
   });
+  store.recordVerificationEvidence({
+    id: "EVIDENCE-DETAIL-1",
+    taskId: "TASK-DETAIL-1",
+    stepId: "build",
+    kind: "workflow_step_validation",
+    command: "bun run quality:check",
+    status: "passed",
+    artifactPath: "artifacts/TASK-DETAIL-1/quality.log",
+    summary: "typecheck, lint, test, and build passed",
+    createdBy: "builder",
+    createdAt: "2026-01-01T00:02:00.000Z",
+  });
   store.recordMessage({
     id: "MSG-DETAIL-1",
     discordMessageId: "message-456",
@@ -87,7 +99,9 @@ function seedTaskDetail(store: RuntimeStore): void {
 
 afterAll(async () => {
   for (const store of stores) store.close();
-  await Promise.allSettled(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })));
+  await Promise.allSettled(
+    tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })),
+  );
 });
 
 describe("built-in office server", () => {
@@ -121,6 +135,7 @@ describe("built-in office server", () => {
     expect(html).toContain("workflowSteps");
     expect(html).toContain("runs");
     expect(html).toContain("artifacts");
+    expect(html).toContain("verificationEvidence");
     expect(html).toContain("reviews");
     expect(html).toContain("timeline");
   });
@@ -138,8 +153,14 @@ describe("built-in office server", () => {
 
   test("exposes browser preview SVGs", async () => {
     const store = await createStore();
-    const officeResponse = handleOfficeRequest(new Request("http://localhost/office-preview.svg"), store);
-    const sheetResponse = handleOfficeRequest(new Request("http://localhost/agent-sheet.svg"), store);
+    const officeResponse = handleOfficeRequest(
+      new Request("http://localhost/office-preview.svg"),
+      store,
+    );
+    const sheetResponse = handleOfficeRequest(
+      new Request("http://localhost/agent-sheet.svg"),
+      store,
+    );
     const officeSvg = await officeResponse.text();
     const sheetSvg = await sheetResponse.text();
 
@@ -191,7 +212,9 @@ describe("built-in office server", () => {
 
     expect(response.status).toBe(200);
     expect(payload.snapshot.tasks[0].id).toBe("TASK-OFFICE-1");
-    expect(payload.snapshot.tasks[0].discordUrl).toBe("https://discord.com/channels/guild-123/channel-123/message-123");
+    expect(payload.snapshot.tasks[0].discordUrl).toBe(
+      "https://discord.com/channels/guild-123/channel-123/message-123",
+    );
     expect(commandTypes).toContain("npc:spawn-local");
     expect(commandTypes).toContain("npc:move-local");
     expect(commandTypes).toContain("npc:bubble");
@@ -218,7 +241,10 @@ describe("built-in office server", () => {
     const store = await createStore();
     seedTaskDetail(store);
 
-    const response = handleOfficeRequest(new Request("http://localhost/api/tasks/TASK-DETAIL-1"), store);
+    const response = handleOfficeRequest(
+      new Request("http://localhost/api/tasks/TASK-DETAIL-1"),
+      store,
+    );
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -228,9 +254,15 @@ describe("built-in office server", () => {
     expect(payload.runs[0].id).toBe("RUN-DETAIL-1");
     expect(payload.artifacts[0].path).toBe("02_Reports/TASK-DETAIL-1.md");
     expect(payload.reviews[0].verdict).toBe("APPROVED");
+    expect(payload.verificationEvidence[0].command).toBe("bun run quality:check");
+    expect(payload.verificationEvidence[0].artifactPath).toBe(
+      "artifacts/TASK-DETAIL-1/quality.log",
+    );
     expect(payload.timeline.length).toBeGreaterThan(0);
     expect(payload.timeline.map((event: { kind: string }) => event.kind)).toContain("artifact");
-    expect(payload.discord.url).toBe("https://discord.com/channels/guild-456/channel-456/message-456");
+    expect(payload.discord.url).toBe(
+      "https://discord.com/channels/guild-456/channel-456/message-456",
+    );
 
     if (previousGuildId === undefined) delete process.env.DISCORD_GUILD_ID;
     else process.env.DISCORD_GUILD_ID = previousGuildId;
@@ -238,7 +270,10 @@ describe("built-in office server", () => {
 
   test("returns 404 for unknown task detail", async () => {
     const store = await createStore();
-    const response = handleOfficeRequest(new Request("http://localhost/api/tasks/MISSING-TASK"), store);
+    const response = handleOfficeRequest(
+      new Request("http://localhost/api/tasks/MISSING-TASK"),
+      store,
+    );
     const payload = await response.json();
 
     expect(response.status).toBe(404);
@@ -247,7 +282,10 @@ describe("built-in office server", () => {
 
   test("returns 400 for invalid task detail path", async () => {
     const store = await createStore();
-    const response = handleOfficeRequest(new Request("http://localhost/api/tasks/TASK-DETAIL-1/extra"), store);
+    const response = handleOfficeRequest(
+      new Request("http://localhost/api/tasks/TASK-DETAIL-1/extra"),
+      store,
+    );
     const payload = await response.json();
 
     expect(response.status).toBe(400);

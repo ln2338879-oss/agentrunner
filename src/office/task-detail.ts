@@ -7,16 +7,23 @@ export interface OfficeTaskDetail {
   workflowSteps: ReturnType<RuntimeStore["listWorkflowStepRuns"]>;
   runs: ReturnType<RuntimeStore["listTaskRuns"]>;
   artifacts: ReturnType<RuntimeStore["listTaskArtifacts"]>;
+  verificationEvidence: ReturnType<RuntimeStore["listVerificationEvidence"]>;
   reviews: ReturnType<RuntimeStore["listTaskReviews"]>;
   timeline: ReturnType<RuntimeStore["getTaskTimeline"]>;
   discord: ReturnType<typeof getTaskDiscordReference>;
 }
 
-export function buildOfficeTaskList(store: RuntimeStore, limit: number): { tasks: ReturnType<RuntimeStore["listRecentTasks"]> } {
+export function buildOfficeTaskList(
+  store: RuntimeStore,
+  limit: number,
+): { tasks: ReturnType<RuntimeStore["listRecentTasks"]> } {
   return { tasks: store.listRecentTasks(limit) };
 }
 
-export function buildOfficeTaskDetail(store: RuntimeStore, taskId: string): OfficeTaskDetail | null {
+export function buildOfficeTaskDetail(
+  store: RuntimeStore,
+  taskId: string,
+): OfficeTaskDetail | null {
   const task = store.getTask(taskId);
   if (!task) return null;
 
@@ -26,6 +33,7 @@ export function buildOfficeTaskDetail(store: RuntimeStore, taskId: string): Offi
     workflowSteps: store.listWorkflowStepRuns(taskId),
     runs: store.listTaskRuns(taskId),
     artifacts: store.listTaskArtifacts(taskId),
+    verificationEvidence: store.listVerificationEvidence(taskId),
     reviews: store.listTaskReviews(taskId),
     timeline: store.getTaskTimeline(taskId),
     discord: getTaskDiscordReference(store, taskId),

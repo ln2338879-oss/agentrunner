@@ -18,7 +18,9 @@ async function openStore(name: string): Promise<{ store: RuntimeStore; dir: stri
 
 afterAll(async () => {
   for (const store of stores) store.close();
-  await Promise.allSettled(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })));
+  await Promise.allSettled(
+    tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })),
+  );
 });
 
 describe("RuntimeStore task lifecycle", () => {
@@ -79,11 +81,17 @@ describe("RuntimeStore leases and recovery", () => {
       obsidianPath: "01_Tasks/TASK-lease-1.md",
     });
 
-    expect(store.acquireTaskLease({ taskId: "TASK-lease-1", owner: "worker-a", ttlMinutes: 10 })).toBe(true);
-    expect(store.acquireTaskLease({ taskId: "TASK-lease-1", owner: "worker-b", ttlMinutes: 10 })).toBe(false);
+    expect(
+      store.acquireTaskLease({ taskId: "TASK-lease-1", owner: "worker-a", ttlMinutes: 10 }),
+    ).toBe(true);
+    expect(
+      store.acquireTaskLease({ taskId: "TASK-lease-1", owner: "worker-b", ttlMinutes: 10 }),
+    ).toBe(false);
 
     store.releaseTaskLease({ taskId: "TASK-lease-1", owner: "worker-a" });
-    expect(store.acquireTaskLease({ taskId: "TASK-lease-1", owner: "worker-b", ttlMinutes: 10 })).toBe(true);
+    expect(
+      store.acquireTaskLease({ taskId: "TASK-lease-1", owner: "worker-b", ttlMinutes: 10 }),
+    ).toBe(true);
   });
 
   test("recovers stale running tasks as blocked", async () => {
@@ -126,25 +134,31 @@ describe("RuntimeStore leases and recovery", () => {
       now: "2026-01-01T00:00:01.000Z",
     });
 
-    expect(store.refreshWorkflowStepLease({
-      taskId: "TASK-step-lease-refresh-1",
-      stepId: "build",
-      owner: "worker:builder:b",
-      ttlMinutes: 10,
-      now: "2026-01-01T00:05:00.000Z",
-    })).toBe(false);
-    expect(store.getWorkflowStepRun("TASK-step-lease-refresh-1", "build")?.lockExpiresAt)
-      .toBe("2026-01-01T00:10:01.000Z");
+    expect(
+      store.refreshWorkflowStepLease({
+        taskId: "TASK-step-lease-refresh-1",
+        stepId: "build",
+        owner: "worker:builder:b",
+        ttlMinutes: 10,
+        now: "2026-01-01T00:05:00.000Z",
+      }),
+    ).toBe(false);
+    expect(store.getWorkflowStepRun("TASK-step-lease-refresh-1", "build")?.lockExpiresAt).toBe(
+      "2026-01-01T00:10:01.000Z",
+    );
 
-    expect(store.refreshWorkflowStepLease({
-      taskId: "TASK-step-lease-refresh-1",
-      stepId: "build",
-      owner: "worker:builder:a",
-      ttlMinutes: 10,
-      now: "2026-01-01T00:05:00.000Z",
-    })).toBe(true);
-    expect(store.getWorkflowStepRun("TASK-step-lease-refresh-1", "build")?.lockExpiresAt)
-      .toBe("2026-01-01T00:15:00.000Z");
+    expect(
+      store.refreshWorkflowStepLease({
+        taskId: "TASK-step-lease-refresh-1",
+        stepId: "build",
+        owner: "worker:builder:a",
+        ttlMinutes: 10,
+        now: "2026-01-01T00:05:00.000Z",
+      }),
+    ).toBe(true);
+    expect(store.getWorkflowStepRun("TASK-step-lease-refresh-1", "build")?.lockExpiresAt).toBe(
+      "2026-01-01T00:15:00.000Z",
+    );
   });
 });
 
@@ -152,7 +166,10 @@ describe("RuntimeStore sessions, steering, and artifacts", () => {
   test("reuses open channel sessions and lists recent messages", async () => {
     const { store } = await openStore("session");
     const first = store.getOrCreateSession({ discordChannelId: "channel-1", title: "Runebound" });
-    const second = store.getOrCreateSession({ discordChannelId: "channel-1", title: "Runebound again" });
+    const second = store.getOrCreateSession({
+      discordChannelId: "channel-1",
+      title: "Runebound again",
+    });
 
     expect(second.id).toBe(first.id);
 
@@ -168,6 +185,26 @@ describe("RuntimeStore sessions, steering, and artifacts", () => {
     const messages = store.listRecentSessionMessages(first.id, 5);
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe("First design note");
+  });
+
+  test("gets task prompt from the first message without querying task fallback", async () => {
+    const { store } = await openStore("prompt-message");
+    store.recordMessage({
+      id: "MSG-prompt-1",
+      discordMessageId: "discord-prompt-1",
+      discordChannelId: "channel-prompt-1",
+      taskId: "TASK-prompt-1",
+      senderRole: "director",
+      content: "Use the original Discord request.",
+    });
+    const originalGetTask = store.getTask.bind(store);
+    store.getTask = (() => {
+      throw new Error("getTask fallback should not run when a prompt message exists.");
+    }) as typeof store.getTask;
+
+    expect(store.getTaskPrompt("TASK-prompt-1")).toBe("Use the original Discord request.");
+
+    store.getTask = originalGetTask;
   });
 
   test("consumes steering messages once", async () => {
@@ -214,5 +251,48 @@ describe("RuntimeStore sessions, steering, and artifacts", () => {
 
     expect(store.listTaskReviews("TASK-artifact-1")[0].verdict).toBe("APPROVED");
     expect(store.listTaskArtifacts("TASK-artifact-1")[0].path).toContain("06_FactoryOutputs");
+  });
+
+  test("records verification evidence for workflow steps and quality checks", async () => {
+    const { store } = await openStore("verification-evidence");
+    store.createTask({
+      id: "TASK-evidence-1",
+      title: "Evidence test",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-evidence-1.md",
+    });
+
+    store.recordVerificationEvidence({
+      id: "EVIDENCE-1",
+      taskId: "TASK-evidence-1",
+      stepId: "build",
+      kind: "workflow_step_validation",
+      command: "bun run test",
+      status: "passed",
+      artifactPath: "artifacts/TASK-evidence-1/test.log",
+      summary: "24 tests passed",
+      createdBy: "builder",
+      metadata: { tests: 24 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    store.recordVerificationEvidence({
+      id: "EVIDENCE-2",
+      taskId: "TASK-evidence-1",
+      kind: "quality_check",
+      command: "bun run lint",
+      status: "failed",
+      artifactPath: "artifacts/TASK-evidence-1/lint.log",
+      summary: "1 lint error",
+      createdBy: "ci",
+      createdAt: "2026-01-01T00:01:00.000Z",
+    });
+
+    const evidence = store.listVerificationEvidence("TASK-evidence-1");
+
+    expect(evidence.map((item) => item.id)).toEqual(["EVIDENCE-1", "EVIDENCE-2"]);
+    expect(evidence[0].stepId).toBe("build");
+    expect(evidence[0].metadataJson).toBe('{"tests":24}');
+    expect(evidence[1].status).toBe("failed");
   });
 });

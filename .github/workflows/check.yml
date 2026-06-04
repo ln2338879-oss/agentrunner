@@ -46,7 +46,20 @@ jobs:
         run: cat typecheck.log && exit 1
 
       - name: Lint
-        run: bun run lint
+        id: lint
+        continue-on-error: true
+        run: bun run lint > lint.log 2>&1
+
+      - name: Upload lint diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-log
+          path: lint.log
+
+      - name: Fail on lint errors
+        if: steps.lint.outcome == 'failure'
+        run: cat lint.log && exit 1
 
       - name: Format check
         run: bun run format:check
@@ -68,4 +81,20 @@ jobs:
         run: cat test.log && exit 1
 
       - name: Build
-        run: bun run build
+        id: build
+        continue-on-error: true
+        run: bun run build > build.log 2>&1
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+
+      - name: Fail on build errors
+        if: steps.build.outcome == 'failure'
+        run: cat build.log && exit 1
+
+      - name: Code quality budget
+        run: bun run quality:budget

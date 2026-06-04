@@ -98,13 +98,16 @@ describe("runtime isolation", () => {
   });
 
   test("runShellCommand executes argv directly instead of sh -lc", async () => {
-    const result = await runShellCommand({ command: "echo agentrunner", timeoutMs: 30000 });
+    const result = await runShellCommand({ command: `bun -e "console.log('agentrunner')"`, timeoutMs: 30000 });
     expect(result.ok).toBe(true);
     expect(result.stdout.trim()).toBe("agentrunner");
   });
 
   test("runCommandSequence supports internal && sequencing without shell control execution", async () => {
-    const result = await runCommandSequence({ command: "echo one && echo two", timeoutMs: 30000 });
+    const result = await runCommandSequence({
+      command: `bun -e "console.log('one')" && bun -e "console.log('two')"`,
+      timeoutMs: 30000,
+    });
     expect(result.ok).toBe(true);
     expect(result.stdout.trim().split(/\s+/)).toEqual(["one", "two"]);
   });

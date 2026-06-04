@@ -64,6 +64,21 @@ CREATE TABLE IF NOT EXISTS runtime_events (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS verification_evidence (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  step_id TEXT,
+  kind TEXT NOT NULL,
+  command TEXT,
+  status TEXT NOT NULL,
+  artifact_path TEXT,
+  summary TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  metadata_json TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (task_id) REFERENCES tasks(id)
+);
+
 CREATE TABLE IF NOT EXISTS worker_heartbeats (
   owner TEXT PRIMARY KEY,
   role TEXT NOT NULL,
@@ -96,6 +111,9 @@ CREATE INDEX IF NOT EXISTS idx_workflow_steps_task_index
 
 CREATE INDEX IF NOT EXISTS idx_runtime_events_task_created
   ON runtime_events(task_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_verification_evidence_task_created
+  ON verification_evidence(task_id, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_seen
   ON worker_heartbeats(last_seen_at);

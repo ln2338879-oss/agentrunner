@@ -27,6 +27,23 @@ export interface ArtifactRow {
   createdAt: string;
 }
 
+export type VerificationEvidenceKind = "workflow_step_validation" | "quality_check";
+export type VerificationEvidenceStatus = "passed" | "failed";
+
+export interface VerificationEvidenceRow {
+  id: string;
+  taskId: string;
+  stepId: string | null;
+  kind: VerificationEvidenceKind;
+  command: string | null;
+  status: VerificationEvidenceStatus;
+  artifactPath: string | null;
+  summary: string;
+  createdBy: string;
+  metadataJson: string | null;
+  createdAt: string;
+}
+
 export interface ReviewRow {
   verdict: ReviewVerdict;
   round: number;
@@ -88,8 +105,20 @@ export interface DashboardStatus {
   byStatus: Array<{ status: string; count: number }>;
   byRole: Array<{ role: string; status: string; count: number }>;
   workflowStepsByStatus: Array<{ status: string; count: number }>;
-  recentFailures: Array<{ id: string; title: string; status: string; assignedTo: string; updatedAt: string }>;
-  activeLocks: Array<{ id: string; title: string; assignedTo: string; lockedBy: string | null; lockExpiresAt: string | null }>;
+  recentFailures: Array<{
+    id: string;
+    title: string;
+    status: string;
+    assignedTo: string;
+    updatedAt: string;
+  }>;
+  activeLocks: Array<{
+    id: string;
+    title: string;
+    assignedTo: string;
+    lockedBy: string | null;
+    lockExpiresAt: string | null;
+  }>;
 }
 
 export interface SessionRow {

@@ -1,0 +1,7 @@
+{
+  "maxRuntimeStoreLines": 500,
+  "maxTypeScriptFileLines": 650,
+  "minTestFiles": 45,
+  "requiredCiArtifacts": ["typecheck-log", "lint-log", "test-log", "build-log"],
+  "preCommitHooks": "deferred"
+}
