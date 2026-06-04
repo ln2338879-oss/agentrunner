@@ -11,7 +11,7 @@ import { RoleRegistry } from "../roles/registry";
 import { classifyTask } from "../router/classify";
 import { planWorkflowForTask } from "../router/workflow-routing";
 import { loadSkillContext } from "../skills/context";
-import { runShellCommand } from "../utils/command";
+import { runCommandSequence } from "../utils/command";
 import { appendVisionAnalysis } from "../vision/adapter";
 import { WorkflowRegistry } from "../workflows/engine";
 import { StepScheduler, type StepSchedulerCycleResult } from "../workflows/step-scheduler";
@@ -365,7 +365,7 @@ export class Orchestrator {
       `REPORT_PATH=${input.reportPath}`,
       `REVIEW_PATH=${input.reviewPath}`,
     ].join("\n");
-    const result = await runShellCommand({
+    const result = await runCommandSequence({
       command: this.config.APPROVED_TASK_COMMAND,
       cwd: this.config.PROJECT_ROOT,
       input: commandInput,
