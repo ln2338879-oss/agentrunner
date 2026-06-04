@@ -1,6 +1,6 @@
 import type { RuntimeConfig } from "../config";
 import type { ReviewVerdict } from "../runtime/types";
-import { runShellCommand, type ShellCommandResult } from "../utils/command";
+import { runCommandSequence, runShellCommand, type ShellCommandResult } from "../utils/command";
 
 interface StrictReviewConfigShape {
   STRICT_REVIEW_ENABLED?: boolean;
@@ -202,7 +202,7 @@ async function listChangedFiles(workspacePath: string, timeoutMs: number): Promi
     };
   }
 
-  const result = await runShellCommand({
+  const result = await runCommandSequence({
     command: [
       "git diff --name-only --relative",
       "git diff --name-only --cached --relative",
@@ -233,7 +233,7 @@ async function runValidationCommands(
   const commands = strictReviewCommands(options);
   const results: StrictReviewValidationResult[] = [];
   for (const command of commands) {
-    const result = await runShellCommand({
+    const result = await runCommandSequence({
       command,
       cwd: workspacePath,
       timeoutMs: options.commandTimeoutMs,
