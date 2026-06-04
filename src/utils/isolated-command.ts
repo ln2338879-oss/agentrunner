@@ -1,3 +1,4 @@
+import { buildGitPathGuardEnv } from "../safety/git-path-guard";
 import { assessRuntimeIsolation, formatRuntimeIsolationViolation, type RuntimeIsolationPolicy } from "../safety/runtime-isolation";
 import { parseCommandLine, runCommand, splitCommandSequence, type RunShellCommandOptions, type ShellCommandResult } from "./command";
 
@@ -22,12 +23,14 @@ export async function runIsolatedCommand(options: RunIsolatedCommandOptions): Pr
 
   if (!decision.ok) return isolationBlocked(decision);
 
+  const env = await isolatedCommandEnv(options);
+
   return runCommand({
     argv: parsed.parsed.argv,
     cwd: options.cwd,
     input: options.input,
     timeoutMs: options.timeoutMs,
-    env: options.env,
+    env,
   });
 }
 
@@ -64,6 +67,14 @@ export async function runIsolatedCommandSequence(options: RunIsolatedCommandOpti
     stderr: stderrParts.join(""),
     timedOut,
   };
+}
+
+async function isolatedCommandEnv(options: RunIsolatedCommandOptions): Promise<NodeJS.ProcessEnv | undefined> {
+  if (options.isolationPolicy?.mode !== "readonly") return options.env;
+  return await buildGitPathGuardEnv({
+    projectRoot: options.isolationPolicy.projectRoot,
+    env: options.env,
+  });
 }
 
 function isolationBlocked(decision: ReturnType<typeof assessRuntimeIsolation>): ShellCommandResult {

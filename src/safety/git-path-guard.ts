@@ -1,4 +1,8 @@
+import { chmod, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { findExecutable } from "../utils/command";
 
 const PROTECTED_GIT_SUBCOMMANDS = new Set([
   "add",
@@ -35,6 +39,43 @@ export interface GitPathGuardDecision {
   reason?: string;
   target: GitInvocationTarget;
   signals: string[];
+}
+
+export interface GitPathGuardEnvOptions {
+  projectRoot: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+export async function buildGitPathGuardEnv(options: GitPathGuardEnvOptions): Promise<NodeJS.ProcessEnv> {
+  const baseEnv = { ...process.env, ...options.env };
+  if (process.platform === "win32") return baseEnv;
+
+  const realGit = findExecutable("git", baseEnv.PATH ?? process.env.PATH ?? "");
+  if (!realGit) return baseEnv;
+
+  const guardDir = await mkdtemp(path.join(os.tmpdir(), "agentrunner-git-guard-"));
+  const guardPath = path.join(guardDir, "git");
+  const projectRoot = await realpath(options.projectRoot).catch(() => path.resolve(options.projectRoot));
+  const shimUrl = pathToFileURL(path.join(import.meta.dir, "git-guard-shim.ts")).href;
+
+  await writeFile(
+    guardPath,
+    [
+      "#!/usr/bin/env bun",
+      `import { runGitGuardShim } from ${JSON.stringify(shimUrl)};`,
+      "runGitGuardShim();",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+  await chmod(guardPath, 0o755);
+
+  return {
+    ...baseEnv,
+    PATH: `${guardDir}${path.delimiter}${baseEnv.PATH ?? ""}`,
+    AGENTRUNNER_REAL_GIT: realGit,
+    AGENTRUNNER_GIT_GUARD_PROJECT_ROOT: projectRoot,
+  };
 }
 
 export function parseGitInvocationTarget(args: string[], initialCwd: string): GitInvocationTarget {
