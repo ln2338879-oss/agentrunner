@@ -2,7 +2,7 @@ import { existsSync, accessSync, constants } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { loadConfig } from "./config";
-import { runShellCommand } from "./utils/command";
+import { commandBinary, findExecutable } from "./utils/command";
 
 export interface CheckResult {
   name: string;
@@ -202,14 +202,13 @@ async function checkWritableDirectory(name: string, directory: string): Promise<
 async function checkCommand(name: string, command: string): Promise<CheckResult> {
   if (!command) return { name, ok: false, detail: "command is empty." };
 
-  const binary = command.trim().split(/\s+/)[0] ?? "";
-  const probe = process.platform === "win32" ? `where ${binary}` : `command -v ${binary}`;
-  const result = await runShellCommand({ command: probe, timeoutMs: 10000 });
+  const binary = commandBinary(command) || command.trim().split(/\s+/)[0] || "";
+  const found = findExecutable(binary);
 
   return {
     name,
-    ok: result.ok,
-    detail: result.ok ? `${binary} found.` : `${binary} not found. ${result.stderr.trim()}`.trim(),
+    ok: Boolean(found),
+    detail: found ? `${binary} found.` : `${binary} not found.`,
   };
 }
 
