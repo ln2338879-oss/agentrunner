@@ -68,6 +68,27 @@ describe("RuntimeStore task lifecycle", () => {
     expect(stored?.status).toBe("running");
     expect(stored?.currentRound).toBe(2);
   });
+
+  test("transitions task status only through allowed runtime states", async () => {
+    const { store } = await openStore("status-machine");
+    store.createTask({
+      id: "TASK-status-machine",
+      title: "State machine",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-status-machine.md",
+    });
+
+    expect(store.transitionTaskStatus("TASK-status-machine", "running")).toBe(true);
+    expect(store.transitionTaskStatus("TASK-status-machine", "review_ready")).toBe(true);
+    expect(store.transitionTaskStatus("TASK-status-machine", "in_review")).toBe(true);
+    expect(store.transitionTaskStatus("TASK-status-machine", "arbiter_requested")).toBe(true);
+    expect(store.transitionTaskStatus("TASK-status-machine", "in_arbitration")).toBe(true);
+    expect(store.transitionTaskStatus("TASK-status-machine", "approved")).toBe(true);
+
+    expect(store.transitionTaskStatus("TASK-status-machine", "pending")).toBe(false);
+    expect(store.getTask("TASK-status-machine")?.status).toBe("approved");
+  });
 });
 
 describe("RuntimeStore leases and recovery", () => {
