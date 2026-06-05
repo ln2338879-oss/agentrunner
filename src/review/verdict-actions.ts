@@ -29,7 +29,7 @@ export async function applyTerminalVerdictAction(input: {
   }
 
   const status = input.verdict === "BLOCKED" ? "blocked" : "failed";
-  input.store.updateTaskStatus(input.taskId, status);
+  input.store.transitionTaskStatus(input.taskId, status);
   input.store.recordRuntimeEvent({
     kind: "terminal_verdict",
     taskId: input.taskId,
@@ -78,7 +78,7 @@ async function applyHumanInterventionAction(input: {
     input.feedback,
   ].filter(Boolean).join("\n"));
 
-  input.store.updateTaskStatus(input.taskId, "needs_human");
+  input.store.transitionTaskStatus(input.taskId, "needs_human");
   input.store.recordArtifact({
     id: `ART-${input.taskId}-${input.verdict.toLowerCase()}-${Date.now()}`,
     taskId: input.taskId,
@@ -195,7 +195,7 @@ async function applySplitTaskAction(input: {
     input.feedback,
   ].filter(Boolean).join("\n"));
 
-  input.store.updateTaskStatus(input.taskId, childTaskIds.length > 0 ? "split_task" : "needs_human");
+  input.store.transitionTaskStatus(input.taskId, childTaskIds.length > 0 ? "split_task" : "needs_human");
   input.store.recordArtifact({
     id: `ART-${input.taskId}-split-task-${Date.now()}`,
     taskId: input.taskId,
@@ -253,9 +253,9 @@ export function extractSplitTaskPrompts(feedback: string): string[] {
 }
 
 function inferChildTaskType(prompt: string): TaskType {
-  if (/구현|코드|버그|테스트|fix|bug|code|test/i.test(prompt)) return "implementation";
-  if (/이미지|디자인|포스터|스프라이트|로고|image|design|sprite|logo/i.test(prompt)) return "design";
-  if (/아이템|몬스터|npc|csv|json|대사|퀘스트|item|monster|dialogue|quest/i.test(prompt)) return "content";
+  if (/\uad6c\ud604|\ucf54\ub4dc|\ubc84\uadf8|\ud14c\uc2a4\ud2b8|fix|bug|code|test/i.test(prompt)) return "implementation";
+  if (/\uc774\ubbf8\uc9c0|\ub514\uc790\uc778|\ud3ec\uc2a4\ud130|\uc2a4\ud504\ub77c\uc774\ud2b8|\ub85c\uace0|image|design|sprite|logo/i.test(prompt)) return "design";
+  if (/\uc544\uc774\ud15c|\ubaac\uc2a4\ud130|npc|csv|json|\ub300\uc0ac|\ud018\uc2a4\ud2b8|item|monster|dialogue|quest/i.test(prompt)) return "content";
   return "planning";
 }
 
