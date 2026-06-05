@@ -62,6 +62,83 @@ export function updateTaskStatus(db: Database, id: string, status: TaskStatus): 
   ).run({ $id: id, $status: status, $updatedAt: new Date().toISOString() });
 }
 
+const ALLOWED_TASK_TRANSITIONS: Record<TaskStatus, readonly TaskStatus[]> = {
+  pending: [
+    "running",
+    "review_ready",
+    "in_review",
+    "arbiter_requested",
+    "in_arbitration",
+    "needs_human",
+    "blocked",
+    "failed",
+    "cancelled",
+  ],
+  running: [
+    "review_ready",
+    "completed",
+    "approved",
+    "needs_revision",
+    "needs_human",
+    "arbiter_requested",
+    "waiting_human_approval",
+    "split_task",
+    "retry_with_different_agent",
+    "blocked",
+    "failed",
+    "cancelled",
+  ],
+  review_ready: ["in_review", "running", "blocked", "failed", "cancelled"],
+  in_review: [
+    "approved",
+    "needs_revision",
+    "needs_human",
+    "arbiter_requested",
+    "waiting_human_approval",
+    "split_task",
+    "retry_with_different_agent",
+    "blocked",
+    "failed",
+    "cancelled",
+  ],
+  needs_revision: ["running", "review_ready", "needs_human", "blocked", "failed", "cancelled"],
+  needs_human: ["running", "waiting_human_approval", "blocked", "failed", "cancelled"],
+  arbiter_requested: ["in_arbitration", "needs_human", "blocked", "failed", "cancelled"],
+  in_arbitration: [
+    "approved",
+    "needs_revision",
+    "needs_human",
+    "waiting_human_approval",
+    "blocked",
+    "failed",
+    "cancelled",
+  ],
+  waiting_human_approval: ["running", "needs_revision", "approved", "blocked", "failed", "cancelled"],
+  split_task: ["running", "blocked", "failed", "cancelled"],
+  retry_with_different_agent: ["running", "needs_human", "blocked", "failed", "cancelled"],
+  completed: ["approved"],
+  approved: ["completed"],
+  blocked: ["running", "needs_revision", "cancelled"],
+  failed: ["running", "needs_revision", "cancelled"],
+  cancelled: [],
+};
+
+export function transitionTaskStatus(db: Database, id: string, status: TaskStatus): boolean {
+  const current = getTask(db, id)?.status as TaskStatus | undefined;
+  if (!current) return false;
+  if (current === status) return true;
+  if (!ALLOWED_TASK_TRANSITIONS[current]?.includes(status)) return false;
+
+  updateTaskStatus(db, id, status);
+  recordRuntimeEvent(db, {
+    kind: "task_status_transition",
+    taskId: id,
+    message: `Task status transitioned from ${current} to ${status}.`,
+    metadata: { from: current, to: status },
+  });
+  return true;
+}
+
 export function setTaskReviewRound(db: Database, id: string, round: number): void {
   db.query(
     `
@@ -162,7 +239,7 @@ export function getDashboardStatus(db: Database): DashboardStatus {
       `
     SELECT
       COUNT(*) as tasks,
-      SUM(CASE WHEN status IN ('pending', 'running', 'needs_revision', 'needs_human', 'split_task', 'retry_with_different_agent') THEN 1 ELSE 0 END) as openTasks,
+      SUM(CASE WHEN status IN ('pending', 'running', 'review_ready', 'in_review', 'needs_revision', 'needs_human', 'arbiter_requested', 'in_arbitration', 'waiting_human_approval', 'split_task', 'retry_with_different_agent') THEN 1 ELSE 0 END) as openTasks,
       SUM(CASE WHEN status IN ('blocked', 'failed') THEN 1 ELSE 0 END) as blockedTasks,
       SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approvedTasks
     FROM tasks
@@ -180,7 +257,7 @@ export function getDashboardStatus(db: Database): DashboardStatus {
       `
     SELECT id, title, status, assigned_to as assignedTo, updated_at as updatedAt
     FROM tasks
-    WHERE status IN ('blocked', 'failed', 'needs_human', 'split_task', 'retry_with_different_agent')
+    WHERE status IN ('blocked', 'failed', 'needs_human', 'arbiter_requested', 'waiting_human_approval', 'split_task', 'retry_with_different_agent')
     ORDER BY updated_at DESC
     LIMIT 10
   `,
