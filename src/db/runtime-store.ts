@@ -88,6 +88,9 @@ export class RuntimeStore {
     this.ensureColumn("attachments", "kind", "TEXT");
     this.ensureColumn("workflow_step_runs", "locked_by", "TEXT");
     this.ensureColumn("workflow_step_runs", "lock_expires_at", "TEXT");
+    this.ensureColumn("workflow_step_runs", "continue_on_failure", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("workflow_step_runs", "attempt_no", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("workflow_step_runs", "active_run_id", "TEXT");
   }
 
   close(): void {
@@ -127,21 +130,23 @@ export class RuntimeStore {
     taskId: string;
     stepId: string;
     owner?: string;
+    runId?: string | null;
     outputRef?: string;
     now?: string;
-  }): void {
-    workflowStepStore.completeWorkflowStepRun(this.db, input);
+  }): boolean {
+    return workflowStepStore.completeWorkflowStepRun(this.db, input);
   }
 
   failWorkflowStepRun(input: {
     taskId: string;
     stepId: string;
     owner?: string;
+    runId?: string | null;
     outputRef?: string;
     error?: string;
     now?: string;
-  }): void {
-    workflowStepStore.failWorkflowStepRun(this.db, input);
+  }): boolean {
+    return workflowStepStore.failWorkflowStepRun(this.db, input);
   }
 
   releaseWorkflowStepLease(input: { taskId: string; stepId: string; owner: string }): void {
@@ -188,6 +193,10 @@ export class RuntimeStore {
 
   updateTaskStatus(id: string, status: TaskStatus): void {
     taskStore.updateTaskStatus(this.db, id, status);
+  }
+
+  transitionTaskStatus(id: string, status: TaskStatus): boolean {
+    return taskStore.transitionTaskStatus(this.db, id, status);
   }
 
   setTaskReviewRound(id: string, round: number): void {
