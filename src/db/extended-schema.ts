@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS workflow_step_runs (
   depends_on_json TEXT NOT NULL,
   required INTEGER NOT NULL,
   requires_review INTEGER NOT NULL,
+  continue_on_failure INTEGER NOT NULL DEFAULT 0,
+  attempt_no INTEGER NOT NULL DEFAULT 0,
+  active_run_id TEXT,
   locked_by TEXT,
   lock_expires_at TEXT,
   started_at TEXT,
@@ -51,6 +54,23 @@ CREATE TABLE IF NOT EXISTS workflow_step_runs (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE(task_id, step_id)
+);
+
+CREATE TABLE IF NOT EXISTS workflow_step_attempts (
+  run_id TEXT PRIMARY KEY,
+  step_run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  workflow_id TEXT NOT NULL,
+  step_id TEXT NOT NULL,
+  attempt_no INTEGER NOT NULL,
+  owner TEXT NOT NULL,
+  status TEXT NOT NULL,
+  output_ref TEXT,
+  error TEXT,
+  claimed_at TEXT NOT NULL,
+  finished_at TEXT,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (step_run_id) REFERENCES workflow_step_runs(id)
 );
 
 CREATE TABLE IF NOT EXISTS runtime_events (
@@ -108,6 +128,9 @@ CREATE INDEX IF NOT EXISTS idx_workflow_steps_claim
 
 CREATE INDEX IF NOT EXISTS idx_workflow_steps_task_index
   ON workflow_step_runs(task_id, step_index);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_step_attempts_step
+  ON workflow_step_attempts(step_run_id, attempt_no);
 
 CREATE INDEX IF NOT EXISTS idx_runtime_events_task_created
   ON runtime_events(task_id, created_at);
