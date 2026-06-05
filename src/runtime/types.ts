@@ -7,14 +7,20 @@ export type TaskType = "planning" | "implementation" | "content" | "design" | "r
 export type TaskStatus =
   | "pending"
   | "running"
+  | "review_ready"
+  | "in_review"
   | "needs_revision"
   | "needs_human"
+  | "arbiter_requested"
+  | "in_arbitration"
+  | "waiting_human_approval"
   | "split_task"
   | "retry_with_different_agent"
   | "completed"
   | "approved"
   | "blocked"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type ReviewVerdict =
   | "APPROVED"
