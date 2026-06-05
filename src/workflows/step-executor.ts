@@ -31,7 +31,7 @@ export interface StepExecutorResult {
   stepId?: string;
   role?: AgentRole;
   action?: string;
-  status?: "completed" | "failed" | "needs_human";
+  status?: "completed" | "failed" | "needs_human" | "stale";
   reportPath?: string;
   verdict?: ReviewVerdict;
   output?: string;
@@ -48,6 +48,7 @@ export class StepExecutor {
   async runOnce(): Promise<StepExecutorResult> {
     const step = this.claimReadyStep();
     if (!step) return { claimed: false };
+    this.markTaskActiveForStep(step);
 
     const prompt = await this.buildRuntimePrompt(step);
     const startedAt = new Date().toISOString();
@@ -81,17 +82,19 @@ export class StepExecutor {
         result = { ...result, output };
       }
 
-      this.recordTaskRun({ step, prompt, result: { ...result, output }, status: runStatus, startedAt });
-      await this.writeReport({ step, result: { ...result, output }, status: runStatus, reportPath, verdict });
-      this.recordArtifacts({ step, result, reportPath });
-
       if (result.ok) {
-        this.options.store.completeWorkflowStepRun({
+        const completed = this.options.store.completeWorkflowStepRun({
           taskId: step.taskId,
           stepId: step.stepId,
           owner: this.options.owner,
+          runId: step.activeRunId,
           outputRef: reportPath,
         });
+        if (!completed) return this.staleResult(step);
+
+        this.recordTaskRun({ step, prompt, result: { ...result, output }, status: runStatus, startedAt });
+        await this.writeReport({ step, result: { ...result, output }, status: runStatus, reportPath, verdict });
+        this.recordArtifacts({ step, result, reportPath });
         if (verdict) {
           await this.recordReviewVerdict({ step, verdict, output, reportPath });
           await this.notifyReview({ step, verdict, output, reportPath });
@@ -100,15 +103,21 @@ export class StepExecutor {
           await this.notifyWorker({ step, output, reportPath });
         }
       } else {
-        this.options.store.failWorkflowStepRun({
+        const failed = this.options.store.failWorkflowStepRun({
           taskId: step.taskId,
           stepId: step.stepId,
           owner: this.options.owner,
+          runId: step.activeRunId,
           outputRef: reportPath,
           error: result.error ?? "Step execution failed.",
         });
+        if (!failed) return this.staleResult(step);
+
+        this.recordTaskRun({ step, prompt, result: { ...result, output }, status: runStatus, startedAt });
+        await this.writeReport({ step, result: { ...result, output }, status: runStatus, reportPath, verdict });
+        this.recordArtifacts({ step, result, reportPath });
         if (result.needsHuman) {
-          this.options.store.updateTaskStatus(step.taskId, "needs_human");
+          this.options.store.transitionTaskStatus(step.taskId, "needs_human");
           this.options.store.recordRuntimeEvent({
             kind: "human_intervention_required",
             taskId: step.taskId,
@@ -127,7 +136,7 @@ export class StepExecutor {
             reason: result.error ?? "Provider requires human intervention.",
           });
         } else {
-          if (step.required) this.options.store.updateTaskStatus(step.taskId, "failed");
+          if (step.required) this.options.store.transitionTaskStatus(step.taskId, "failed");
           await this.notifyWorker({ step, output, reportPath });
         }
       }
@@ -146,13 +155,15 @@ export class StepExecutor {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.options.store.failWorkflowStepRun({
+      const failed = this.options.store.failWorkflowStepRun({
         taskId: step.taskId,
         stepId: step.stepId,
         owner: this.options.owner,
+        runId: step.activeRunId,
         error: message,
       });
-      if (step.required) this.options.store.updateTaskStatus(step.taskId, "failed");
+      if (!failed) return this.staleResult(step);
+      if (step.required) this.options.store.transitionTaskStatus(step.taskId, "failed");
 
       this.options.store.recordTaskRun({
         id: `RUN-${step.taskId}-${this.options.role}-${step.stepId}-${Date.now()}`,
@@ -190,6 +201,30 @@ export class StepExecutor {
       if (step) return step;
     }
     return null;
+  }
+
+  private markTaskActiveForStep(step: WorkflowStepRunRow): void {
+    if (step.action === "arbitrate") {
+      this.options.store.transitionTaskStatus(step.taskId, "in_arbitration");
+      return;
+    }
+    if (isReviewAction(step.action)) {
+      this.options.store.transitionTaskStatus(step.taskId, "in_review");
+      return;
+    }
+    this.options.store.transitionTaskStatus(step.taskId, "running");
+  }
+
+  private staleResult(step: WorkflowStepRunRow): StepExecutorResult {
+    return {
+      claimed: true,
+      taskId: step.taskId,
+      stepId: step.stepId,
+      role: this.options.role,
+      action: step.action,
+      status: "stale",
+      error: "Workflow step result was suppressed because the attempt is no longer current.",
+    };
   }
 
   private startWorkflowStepLeaseRefresh(step: WorkflowStepRunRow): () => void {
@@ -489,12 +524,25 @@ export class StepExecutor {
 
     if (input.verdict === "APPROVED") {
       this.skipPendingOptionalSteps(input.step.taskId, "Approved by workflow review step.");
-      this.options.store.updateTaskStatus(input.step.taskId, "approved");
+      this.options.store.transitionTaskStatus(input.step.taskId, "approved");
       return;
     }
 
     if (input.verdict === "NEEDS_REVISION") {
       this.requeueRevisionSteps(input.step, round, input.output);
+      return;
+    }
+
+    if (input.verdict === "BLOCKED" && this.hasPendingArbitrationStep(input.step)) {
+      this.options.store.transitionTaskStatus(input.step.taskId, "arbiter_requested");
+      this.options.store.recordRuntimeEvent({
+        kind: "arbitration_requested",
+        taskId: input.step.taskId,
+        stepId: input.step.stepId,
+        owner: this.options.owner,
+        message: "BLOCKED review routed to workflow arbitration.",
+        metadata: { reviewPath: input.reportPath },
+      });
       return;
     }
 
@@ -513,7 +561,7 @@ export class StepExecutor {
 
   private requeueRevisionSteps(step: WorkflowStepRunRow, round: number, feedback: string): void {
     if (round >= this.options.config.MAX_REVIEW_ROUNDS) {
-      this.options.store.updateTaskStatus(step.taskId, "blocked");
+      this.options.store.transitionTaskStatus(step.taskId, "blocked");
       return;
     }
 
@@ -537,7 +585,7 @@ export class StepExecutor {
       stepId: step.stepId,
       reason,
     });
-    this.options.store.updateTaskStatus(step.taskId, "needs_revision");
+    this.options.store.transitionTaskStatus(step.taskId, "needs_revision");
   }
 
   private async notifyWorker(input: {
@@ -574,8 +622,15 @@ export class StepExecutor {
     const requiredDone = steps
       .filter((step) => step.required)
       .every((step) => step.status === "completed" || step.status === "skipped");
-    if (requiredDone) this.options.store.updateTaskStatus(taskId, "completed");
-    else this.options.store.updateTaskStatus(taskId, "running");
+    if (requiredDone) this.options.store.transitionTaskStatus(taskId, "completed");
+    else this.options.store.transitionTaskStatus(taskId, "running");
+  }
+
+  private hasPendingArbitrationStep(step: WorkflowStepRunRow): boolean {
+    if (step.action !== "review") return false;
+    return this.options.store
+      .listWorkflowStepRuns(step.taskId)
+      .some((candidate) => candidate.action === "arbitrate" && candidate.status === "pending");
   }
 
   private skipPendingOptionalSteps(taskId: string, reason: string): void {
