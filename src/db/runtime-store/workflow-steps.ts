@@ -12,7 +12,9 @@ import { recordRuntimeEvent } from "./runtime-events";
 interface ClaimReadyWorkflowStepCandidate {
   id: string;
   taskId: string;
+  workflowId: string;
   stepId: string;
+  attemptNo: number;
   dependsOnJson: string;
 }
 
@@ -36,6 +38,7 @@ export function initializeWorkflowStepRuns(
         depends_on_json,
         required,
         requires_review,
+        continue_on_failure,
         created_at,
         updated_at
       ) VALUES (
@@ -51,6 +54,7 @@ export function initializeWorkflowStepRuns(
         $dependsOnJson,
         $required,
         $requiresReview,
+        $continueOnFailure,
         $now,
         $now
       )
@@ -69,6 +73,7 @@ export function initializeWorkflowStepRuns(
         $dependsOnJson: JSON.stringify(step.dependsOn),
         $required: step.required ? 1 : 0,
         $requiresReview: step.requiresReview ? 1 : 0,
+        $continueOnFailure: step.continueOnFailure ? 1 : 0,
         $now: now,
       });
     });
@@ -95,13 +100,15 @@ export function claimReadyWorkflowStep(
       SELECT
         step.id as id,
         step.task_id as taskId,
+        step.workflow_id as workflowId,
         step.step_id as stepId,
+        step.attempt_no as attemptNo,
         step.depends_on_json as dependsOnJson
       FROM workflow_step_runs step
       JOIN tasks task ON task.id = step.task_id
       WHERE step.status = 'pending'
         AND step.resolved_role_id = $roleId
-        AND task.status IN ('pending', 'running', 'needs_revision')
+        AND task.status IN ('pending', 'running', 'review_ready', 'in_review', 'needs_revision', 'arbiter_requested', 'in_arbitration')
         AND (step.locked_by IS NULL OR step.lock_expires_at IS NULL OR step.lock_expires_at <= $nowIso)
       ORDER BY task.created_at ASC, step.step_index ASC
     `,
@@ -113,11 +120,20 @@ export function claimReadyWorkflowStep(
     );
     if (!ready) return null;
 
+    const attemptNo = ready.attemptNo + 1;
+    const runId = buildWorkflowStepRunId(ready.taskId, ready.stepId, attemptNo);
     const result = db
       .query(
         `
       UPDATE workflow_step_runs
-      SET status = 'running', locked_by = $owner, lock_expires_at = $expiresAt, started_at = COALESCE(started_at, $nowIso), updated_at = $nowIso
+      SET
+        status = 'running',
+        locked_by = $owner,
+        lock_expires_at = $expiresAt,
+        started_at = COALESCE(started_at, $nowIso),
+        attempt_no = attempt_no + 1,
+        active_run_id = $runId,
+        updated_at = $nowIso
       WHERE id = $id
         AND status = 'pending'
         AND resolved_role_id = $roleId
@@ -130,16 +146,53 @@ export function claimReadyWorkflowStep(
         $owner: input.owner,
         $expiresAt: expiresAt,
         $nowIso: nowIso,
+        $runId: runId,
       });
 
     if (result.changes === 0) return null;
+    db.query(
+      `
+      INSERT INTO workflow_step_attempts (
+        run_id,
+        step_run_id,
+        task_id,
+        workflow_id,
+        step_id,
+        attempt_no,
+        owner,
+        status,
+        claimed_at,
+        updated_at
+      ) VALUES (
+        $runId,
+        $stepRunId,
+        $taskId,
+        $workflowId,
+        $stepId,
+        $attemptNo,
+        $owner,
+        'running',
+        $nowIso,
+        $nowIso
+      )
+    `,
+    ).run({
+      $runId: runId,
+      $stepRunId: ready.id,
+      $taskId: ready.taskId,
+      $workflowId: ready.workflowId,
+      $stepId: ready.stepId,
+      $attemptNo: attemptNo,
+      $owner: input.owner,
+      $nowIso: nowIso,
+    });
     recordRuntimeEvent(db, {
       kind: "workflow_step_claimed",
       taskId: ready.taskId,
       stepId: ready.stepId,
       owner: input.owner,
       message: `Workflow step claimed by ${input.owner}.`,
-      metadata: { roleId: input.roleId, expiresAt },
+      metadata: { roleId: input.roleId, expiresAt, runId, attemptNo },
     });
     return { taskId: ready.taskId, stepId: ready.stepId };
   });
@@ -154,11 +207,12 @@ export function completeWorkflowStepRun(
     taskId: string;
     stepId: string;
     owner?: string;
+    runId?: string | null;
     outputRef?: string;
     now?: string;
   },
-): void {
-  finishClaimedWorkflowStepRun(db, { ...input, status: "completed" });
+): boolean {
+  return finishClaimedWorkflowStepRun(db, { ...input, status: "completed" });
 }
 
 export function failWorkflowStepRun(
@@ -167,12 +221,13 @@ export function failWorkflowStepRun(
     taskId: string;
     stepId: string;
     owner?: string;
+    runId?: string | null;
     outputRef?: string;
     error?: string;
     now?: string;
   },
-): void {
-  finishClaimedWorkflowStepRun(db, { ...input, status: "failed" });
+): boolean {
+  return finishClaimedWorkflowStepRun(db, { ...input, status: "failed" });
 }
 
 export function releaseWorkflowStepLease(
@@ -248,6 +303,7 @@ export function updateWorkflowStepRun(
       finished_at = CASE WHEN $status IN ('completed', 'skipped', 'failed') THEN $now ELSE finished_at END,
       locked_by = CASE WHEN $status IN ('completed', 'skipped', 'failed') THEN NULL ELSE locked_by END,
       lock_expires_at = CASE WHEN $status IN ('completed', 'skipped', 'failed') THEN NULL ELSE lock_expires_at END,
+      active_run_id = CASE WHEN $status IN ('completed', 'skipped', 'failed') THEN NULL ELSE active_run_id END,
       output_ref = COALESCE($outputRef, output_ref),
       error = COALESCE($error, error),
       updated_at = $now
@@ -282,6 +338,7 @@ export function requeueWorkflowStepRun(
       lock_expires_at = NULL,
       started_at = NULL,
       finished_at = NULL,
+      active_run_id = NULL,
       output_ref = NULL,
       error = $reason,
       updated_at = $now
@@ -347,7 +404,7 @@ export function recoverInterruptedWorkflowSteps(
       FROM workflow_step_runs step
       JOIN tasks task ON task.id = step.task_id
       WHERE step.status = 'running'
-        AND task.status IN ('pending', 'running', 'needs_revision')
+        AND task.status IN ('pending', 'running', 'review_ready', 'in_review', 'needs_revision', 'arbiter_requested', 'in_arbitration')
         AND (step.lock_expires_at IS NULL OR step.lock_expires_at <= $staleBefore OR step.updated_at <= $staleBefore)
       ORDER BY task.created_at ASC, step.step_index ASC
     `,
@@ -362,14 +419,14 @@ export function recoverInterruptedWorkflowSteps(
         ? `
         UPDATE workflow_step_runs
         SET status = 'pending', locked_by = NULL, lock_expires_at = NULL, started_at = NULL, finished_at = NULL,
-            error = $reason, updated_at = $now
+            active_run_id = NULL, error = $reason, updated_at = $now
         WHERE status = 'running'
           AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
       `
         : `
         UPDATE workflow_step_runs
         SET status = 'failed', locked_by = NULL, lock_expires_at = NULL, finished_at = $now,
-            error = $reason, updated_at = $now
+            active_run_id = NULL, error = $reason, updated_at = $now
         WHERE status = 'running'
           AND (lock_expires_at IS NULL OR lock_expires_at <= $staleBefore OR updated_at <= $staleBefore)
       `;
@@ -412,14 +469,15 @@ function finishClaimedWorkflowStepRun(
     stepId: string;
     status: "completed" | "failed";
     owner?: string;
+    runId?: string | null;
     outputRef?: string;
     error?: string;
     now?: string;
   },
-): void {
+): boolean {
   const now = input.now ?? new Date().toISOString();
   const ownerPredicate = input.owner ? "AND locked_by = $owner" : "";
-  db.query(
+  const result = db.query(
     `
     UPDATE workflow_step_runs
     SET
@@ -427,20 +485,83 @@ function finishClaimedWorkflowStepRun(
       finished_at = $now,
       locked_by = NULL,
       lock_expires_at = NULL,
+      active_run_id = NULL,
       output_ref = COALESCE($outputRef, output_ref),
       error = COALESCE($error, error),
       updated_at = $now
-    WHERE task_id = $taskId AND step_id = $stepId ${ownerPredicate}
+    WHERE task_id = $taskId
+      AND step_id = $stepId
+      ${ownerPredicate}
+      AND (active_run_id IS NULL OR active_run_id = $runId)
   `,
   ).run({
     $taskId: input.taskId,
     $stepId: input.stepId,
     $status: input.status,
     $owner: input.owner ?? null,
+    $runId: input.runId ?? null,
     $outputRef: input.outputRef ?? null,
     $error: input.error ?? null,
     $now: now,
   });
+
+  if (result.changes > 0) {
+    if (input.runId) {
+      db.query(
+        `
+        UPDATE workflow_step_attempts
+        SET status = $status,
+            output_ref = COALESCE($outputRef, output_ref),
+            error = COALESCE($error, error),
+            finished_at = $now,
+            updated_at = $now
+        WHERE run_id = $runId
+      `,
+      ).run({
+        $runId: input.runId,
+        $status: input.status,
+        $outputRef: input.outputRef ?? null,
+        $error: input.error ?? null,
+        $now: now,
+      });
+    }
+    return true;
+  }
+
+  if (input.runId) {
+    const current = getWorkflowStepRun(db, input.taskId, input.stepId);
+    if (current?.activeRunId && current.activeRunId !== input.runId) {
+      db.query(
+        `
+        UPDATE workflow_step_attempts
+        SET status = 'suppressed',
+            output_ref = COALESCE($outputRef, output_ref),
+            error = COALESCE($error, error),
+            finished_at = $now,
+            updated_at = $now
+        WHERE run_id = $runId
+      `,
+      ).run({
+        $runId: input.runId,
+        $outputRef: input.outputRef ?? null,
+        $error: input.error ?? null,
+        $now: now,
+      });
+      recordRuntimeEvent(db, {
+        kind: "stale_workflow_step_result",
+        taskId: input.taskId,
+        stepId: input.stepId,
+        owner: input.owner,
+        message: "Suppressed stale workflow step result.",
+        metadata: {
+          staleRunId: input.runId,
+          activeRunId: current.activeRunId,
+          attemptedStatus: input.status,
+        },
+      });
+    }
+  }
+  return false;
 }
 
 function workflowStepDependenciesComplete(
@@ -456,8 +577,9 @@ function workflowStepDependenciesComplete(
   }) as WorkflowStepRunRow[];
   const byStepId = new Map(rows.map((step) => [step.stepId, step]));
   return dependsOn.every((stepId) => {
-    const status = byStepId.get(stepId)?.status;
-    return status === "completed" || status === "skipped";
+    const dependency = byStepId.get(stepId);
+    const status = dependency?.status;
+    return status === "completed" || status === "skipped" || (status === "failed" && dependency?.continueOnFailure === 1);
   });
 }
 
@@ -476,6 +598,9 @@ function workflowStepQuery(db: Database, whereClause: string) {
       depends_on_json as dependsOnJson,
       required,
       requires_review as requiresReview,
+      continue_on_failure as continueOnFailure,
+      attempt_no as attemptNo,
+      active_run_id as activeRunId,
       locked_by as lockedBy,
       lock_expires_at as lockExpiresAt,
       started_at as startedAt,
@@ -492,4 +617,8 @@ function workflowStepQuery(db: Database, whereClause: string) {
 function taskStatusAfterRequeue(status: string | undefined | null): "pending" | "needs_revision" {
   if (status === "needs_revision") return "needs_revision";
   return "pending";
+}
+
+function buildWorkflowStepRunId(taskId: string, stepId: string, attemptNo: number): string {
+  return `RUN-${taskId}-${stepId}-${attemptNo}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
