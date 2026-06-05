@@ -210,6 +210,73 @@ describe("director workflow step execution", () => {
     expect(store.listTaskReviews("TASK-REVISION-REQUEUE")[0]?.verdict).toBe("NEEDS_REVISION");
   });
 
+  test("blocked review requests arbitration instead of ending the task", async () => {
+    const { store, vault, config } = await createRuntime();
+    await createImplementationTask(store, "TASK-BLOCKED-ARBITRATION");
+    completePlanAndBuild(store, "TASK-BLOCKED-ARBITRATION");
+
+    const reviewResult = await new StepExecutor({
+      role: "director",
+      owner: "worker:director",
+      store,
+      vault,
+      agent: directorAgent("VERDICT: BLOCKED\nThe reviewer cannot decide safely."),
+      config,
+    }).runOnce();
+
+    expect(reviewResult.stepId).toBe("review");
+    expect(reviewResult.verdict).toBe("BLOCKED");
+    expect(store.getTask("TASK-BLOCKED-ARBITRATION")?.status).toBe("arbiter_requested");
+
+    const arbiterResult = await new StepExecutor({
+      role: "director",
+      owner: "worker:director",
+      store,
+      vault,
+      agent: directorAgent("VERDICT: APPROVED\nThe arbiter accepts the implementation."),
+      config,
+    }).runOnce();
+
+    expect(arbiterResult.stepId).toBe("arbitrate-if-blocked");
+    expect(arbiterResult.verdict).toBe("APPROVED");
+    expect(store.getTask("TASK-BLOCKED-ARBITRATION")?.status).toBe("approved");
+  });
+
+  for (const scenario of [
+    { verdict: "NEEDS_REVISION", expectedStatus: "needs_revision" },
+    { verdict: "NEEDS_HUMAN", expectedStatus: "needs_human" },
+    { verdict: "BLOCKED", expectedStatus: "blocked" },
+  ] as const) {
+    test(`arbiter ${scenario.verdict} verdict moves task to ${scenario.expectedStatus}`, async () => {
+      const { store, vault, config } = await createRuntime();
+      const taskId = `TASK-ARBITER-${scenario.verdict}`;
+      await createImplementationTask(store, taskId);
+      completePlanAndBuild(store, taskId);
+
+      await new StepExecutor({
+        role: "director",
+        owner: "worker:director",
+        store,
+        vault,
+        agent: directorAgent("VERDICT: BLOCKED\nEscalate to arbiter."),
+        config,
+      }).runOnce();
+
+      const result = await new StepExecutor({
+        role: "director",
+        owner: "worker:director",
+        store,
+        vault,
+        agent: directorAgent(`VERDICT: ${scenario.verdict}\nArbiter decision.`),
+        config,
+      }).runOnce();
+
+      expect(result.stepId).toBe("arbitrate-if-blocked");
+      expect(result.verdict).toBe(scenario.verdict);
+      expect(store.getTask(taskId)?.status).toBe(scenario.expectedStatus);
+    });
+  }
+
   test("retry with different agent verdict escalates to human instead of switching agents", async () => {
     const { store, vault, config } = await createRuntime();
     await createImplementationTask(store, "TASK-RETRY-HUMAN");
