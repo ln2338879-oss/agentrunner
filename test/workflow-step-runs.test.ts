@@ -153,4 +153,126 @@ describe("workflow step runs", () => {
     expect(second).toBeNull();
     expect(store.getWorkflowStepRun("TASK-STEP-CLAIM-ONCE", "build")?.lockedBy).toBe("worker:a");
   });
+
+  test("records attempt ownership when claiming workflow steps", async () => {
+    const store = await createTempStore();
+    const workflowPlan = createDefaultWorkflowRegistry().plan(undefined, "implementation");
+
+    store.createTask({
+      id: "TASK-STEP-ATTEMPT-1",
+      title: "Attempt ownership",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-STEP-ATTEMPT-1.md",
+      workflowPlan,
+    });
+    expect(store.completeWorkflowStepRun({
+      taskId: "TASK-STEP-ATTEMPT-1",
+      stepId: "plan",
+      outputRef: "01_Tasks/TASK-STEP-ATTEMPT-1.md",
+    })).toBe(true);
+
+    const first = store.claimReadyWorkflowStep({
+      roleId: "builder",
+      owner: "worker:a",
+      ttlMinutes: 1,
+      now: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(first?.attemptNo).toBe(1);
+    expect(first?.activeRunId).toMatch(/^RUN-/);
+    expect(first?.lockedBy).toBe("worker:a");
+  });
+
+  test("creates a new attempt after a stale workflow step is requeued", async () => {
+    const store = await createTempStore();
+    const workflowPlan = createDefaultWorkflowRegistry().plan(undefined, "implementation");
+
+    store.createTask({
+      id: "TASK-STEP-ATTEMPT-2",
+      title: "Attempt retry",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-STEP-ATTEMPT-2.md",
+      workflowPlan,
+    });
+    store.completeWorkflowStepRun({
+      taskId: "TASK-STEP-ATTEMPT-2",
+      stepId: "plan",
+      outputRef: "01_Tasks/TASK-STEP-ATTEMPT-2.md",
+    });
+
+    const first = store.claimReadyWorkflowStep({
+      roleId: "builder",
+      owner: "worker:a",
+      ttlMinutes: 1,
+      now: "2026-01-01T00:00:00.000Z",
+    });
+    store.requeueWorkflowStepRun({
+      taskId: "TASK-STEP-ATTEMPT-2",
+      stepId: "build",
+      reason: "Recovered stale attempt.",
+      now: "2026-01-01T00:02:00.000Z",
+    });
+    const second = store.claimReadyWorkflowStep({
+      roleId: "builder",
+      owner: "worker:b",
+      ttlMinutes: 1,
+      now: "2026-01-01T00:02:01.000Z",
+    });
+
+    expect(first?.attemptNo).toBe(1);
+    expect(second?.attemptNo).toBe(2);
+    expect(second?.activeRunId).not.toBe(first?.activeRunId);
+    expect(store.completeWorkflowStepRun({
+      taskId: "TASK-STEP-ATTEMPT-2",
+      stepId: "build",
+      owner: "worker:a",
+      runId: first?.activeRunId,
+      outputRef: "stale.md",
+    })).toBe(false);
+    expect(store.getWorkflowStepRun("TASK-STEP-ATTEMPT-2", "build")?.status).toBe("running");
+    expect(store.getWorkflowStepRun("TASK-STEP-ATTEMPT-2", "build")?.outputRef).toBeNull();
+  });
+
+  test("uses continueOnFailure when checking workflow dependencies", async () => {
+    const store = await createTempStore();
+    const workflowPlan = createDefaultWorkflowRegistry().plan(undefined, "implementation");
+    workflowPlan.steps = workflowPlan.steps.map((step) =>
+      step.id === "review" ? { ...step, continueOnFailure: true } : step,
+    );
+
+    store.createTask({
+      id: "TASK-CONTINUE-FAILURE",
+      title: "Continue after failed review",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-CONTINUE-FAILURE.md",
+      workflowPlan,
+    });
+    store.completeWorkflowStepRun({
+      taskId: "TASK-CONTINUE-FAILURE",
+      stepId: "plan",
+      outputRef: "01_Tasks/TASK-CONTINUE-FAILURE.md",
+    });
+    store.completeWorkflowStepRun({
+      taskId: "TASK-CONTINUE-FAILURE",
+      stepId: "build",
+      outputRef: "05_BuilderReports/TASK-CONTINUE-FAILURE-build.md",
+    });
+    store.failWorkflowStepRun({
+      taskId: "TASK-CONTINUE-FAILURE",
+      stepId: "review",
+      error: "Reviewer blocked.",
+    });
+
+    const arbiter = store.claimReadyWorkflowStep({
+      roleId: "arbiter",
+      owner: "worker:director",
+      ttlMinutes: 30,
+    });
+
+    expect(store.getWorkflowStepRun("TASK-CONTINUE-FAILURE", "review")?.continueOnFailure).toBe(1);
+    expect(arbiter?.stepId).toBe("arbitrate-if-blocked");
+  });
 });
