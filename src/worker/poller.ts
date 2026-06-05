@@ -18,7 +18,7 @@ export interface WorkerPollResult {
   claimed: boolean;
   taskId?: string;
   stepId?: string;
-  status?: "completed" | "failed" | "needs_human";
+  status?: "completed" | "failed" | "needs_human" | "stale";
   reportPath?: string;
   error?: string;
 }
