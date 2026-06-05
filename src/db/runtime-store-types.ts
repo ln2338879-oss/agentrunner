@@ -75,6 +75,9 @@ export interface WorkflowStepRunRow {
   dependsOnJson: string;
   required: number;
   requiresReview: number;
+  continueOnFailure: number;
+  attemptNo: number;
+  activeRunId: string | null;
   lockedBy: string | null;
   lockExpiresAt: string | null;
   startedAt: string | null;
