@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -305,5 +306,65 @@ describe("workflow step claim and executor", () => {
     expect(observedInitialExpiry).not.toBe("");
     expect(observedRefreshedExpiry).not.toBe("");
     expect(observedRefreshedExpiry > observedInitialExpiry).toBe(true);
+  });
+
+  test("suppresses executor side effects when a claimed attempt becomes stale", async () => {
+    const { store, vault, dir } = await createTempRuntime();
+    const workflowPlan = createDefaultWorkflowRegistry().plan(undefined, "implementation");
+    const config = loadConfig({
+      DATABASE_PATH: path.join(dir, "runtime.sqlite"),
+      OBSIDIAN_VAULT_PATH: path.join(dir, "vault"),
+      PROJECT_ROOT: dir,
+      CODEX_COMMAND: "mock-codex",
+    });
+
+    store.createTask({
+      id: "TASK-STALE-EXECUTOR",
+      title: "Suppress stale executor output",
+      type: "implementation",
+      assignedTo: "builder",
+      obsidianPath: "01_Tasks/TASK-STALE-EXECUTOR.md",
+      workflowPlan,
+    });
+    store.completeWorkflowStepRun({
+      taskId: "TASK-STALE-EXECUTOR",
+      stepId: "plan",
+      outputRef: "01_Tasks/TASK-STALE-EXECUTOR.md",
+    });
+
+    const result = await new StepExecutor({
+      role: "builder",
+      owner: "worker:builder:a",
+      store,
+      vault,
+      agent: {
+        role: "builder",
+        async run(): Promise<AgentRunResult> {
+          const staleRunId = store.getWorkflowStepRun("TASK-STALE-EXECUTOR", "build")?.activeRunId;
+          expect(staleRunId).toMatch(/^RUN-/);
+          store.requeueWorkflowStepRun({
+            taskId: "TASK-STALE-EXECUTOR",
+            stepId: "build",
+            reason: "Recovered stale executor attempt.",
+          });
+          const replacement = store.claimReadyWorkflowStep({
+            roleId: "builder",
+            owner: "worker:builder:b",
+            ttlMinutes: 30,
+          });
+          expect(replacement?.attemptNo).toBe(2);
+          return { ok: true, output: "stale output must not be recorded" };
+        },
+      },
+      config,
+    }).runOnce();
+
+    expect(result.status).toBe("stale");
+    expect(store.getWorkflowStepRun("TASK-STALE-EXECUTOR", "build")?.status).toBe("running");
+    expect(store.getWorkflowStepRun("TASK-STALE-EXECUTOR", "build")?.lockedBy).toBe("worker:builder:b");
+    expect(store.listTaskRuns("TASK-STALE-EXECUTOR")).toHaveLength(0);
+    expect(store.listTaskArtifacts("TASK-STALE-EXECUTOR")).toHaveLength(0);
+    expect(store.getTask("TASK-STALE-EXECUTOR")?.status).toBe("running");
+    expect(existsSync(path.join(dir, "vault", "05_BuilderReports/TASK-STALE-EXECUTOR-build-builder-step.md"))).toBe(false);
   });
 });
